@@ -3,14 +3,14 @@
 """
 GROQ TABLE CLASSIFIER - Classificador Inteligente de Tabelas
 🤖 Usa Groq AI para decidir em qual tabela cada item deve ser inserido
-✨ Agora com suporte para múltiplas categorias (tabela diversos)
+✨ Versão refatorada - Oportunidades agora é apenas uma VIEW SQL
 """
 
 import json
 import requests
 import os
 import re
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List
 from dotenv import load_dotenv
 
 # Carrega variáveis do arquivo .env
@@ -24,22 +24,19 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 class GroqTableClassifier:
     """Classificador que usa Groq para decidir a tabela correta"""
     
-    # 📋 PILARES E CATEGORIAS
-    # Pilar 1: Varejo e Consumo Direto
-    # Pilar 2: Casa e Decoração
-    # Pilar 3: Imóveis e Construção
-    # Pilar 4: Especialidades e Diversos
+    # 📋 TABELAS DO BANCO DE DADOS
+    # Organizado por Pilares para melhor organização
     
     TABLES_INFO = {
         # ==================== PILAR 1: VAREJO E CONSUMO DIRETO ====================
         'bens_consumo': {
             'desc': 'Bens de consumo diversos e artigos pessoais',
-            'exemplos': 'roupas, calçados, bolsas, acessórios, cosméticos, perfumes, produtos de higiene, joias, relógios',
+            'exemplos': 'roupas, calçados, bolsas, acessórios, cosméticos, perfumes, produtos de higiene, joias, relógios, malas',
             'pilar': 1
         },
         'eletrodomesticos': {
             'desc': 'Eletrodomésticos e linha branca para uso residencial',
-            'exemplos': 'geladeiras, fogões, micro-ondas, lavadoras, secadoras, ar condicionado, ventiladores, purificadores, aspiradores, ferros de passar, cafeteiras, liquidificadores, batedeiras',
+            'exemplos': 'geladeiras, fogões, micro-ondas, lavadoras, secadoras, ar condicionado, ventiladores, purificadores, aspiradores, ferros de passar, cafeteiras, liquidificadores, batedeiras, smart TVs, air fryers',
             'pilar': 1
         },
         'tecnologia': {
@@ -50,6 +47,11 @@ class GroqTableClassifier:
         'veiculos': {
             'desc': 'QUALQUER meio de transporte ou locomoção, motorizado ou não',
             'exemplos': 'carros, motos, caminhões, ônibus, tratores, bicicletas, patins, patinetes, skates, scooters, hoverboards, veículos elétricos, jet ski, lanchas, barcos, aeronaves, qualquer coisa usada para se locomover',
+            'pilar': 1
+        },
+        'alimentos_bebidas': {
+            'desc': 'Alimentos e bebidas',
+            'exemplos': 'alimentos não perecíveis, bebidas, vinhos, cafés, suplementos alimentares, produtos alimentícios',
             'pilar': 1
         },
         
@@ -67,11 +69,6 @@ class GroqTableClassifier:
         'artes_colecionismo': {
             'desc': 'Arte, antiguidades e colecionáveis',
             'exemplos': 'quadros, esculturas, antiguidades, moedas, selos, itens colecionáveis, obras de arte, objetos raros',
-            'pilar': 2
-        },
-        'alimentos_bebidas': {
-            'desc': 'Alimentos e bebidas',
-            'exemplos': 'alimentos não perecíveis, bebidas, vinhos, cafés, suplementos alimentares, produtos alimentícios',
             'pilar': 2
         },
         
@@ -119,15 +116,10 @@ class GroqTableClassifier:
             'pilar': 4
         },
         'diversos': {
-            'desc': '🎯 MÚLTIPLAS CATEGORIAS - Itens que pertencem a 2 ou mais categorias simultaneamente',
-            'exemplos': 'Smart TV (tecnologia + eletrodomesticos), Air Fryer com Wi-Fi (tecnologia + eletrodomesticos), Geladeira Inteligente (tecnologia + eletrodomesticos), Smartwatch fitness (tecnologia + bens_consumo)',
+            'desc': '🎯 LOTES MISTOS E ITENS DIVERSOS - Para itens que explicitamente combinam múltiplas categorias diferentes OU descritos como "diversos"',
+            'exemplos': 'APENAS itens com texto literal tipo "itens diversos", "lote misto", "mercadorias variadas" OU combinações explícitas tipo "Kit Notebook + Impressora", "Lote: Cafeteira + Tablet + Fones"',
             'pilar': 4,
-            'special': True  # Marca como tabela especial
-        },
-        'oportunidades': {
-            'desc': 'Oportunidades gerais, lotes mistos e itens não classificáveis nas outras categorias',
-            'exemplos': 'lotes mistos, itens variados, oportunidades gerais sem categoria específica, mercadorias diversas',
-            'pilar': 4
+            'special': True
         }
     }
     
@@ -147,82 +139,68 @@ class GroqTableClassifier:
             'total': 0,
             'success': 0,
             'failed': 0,
-            'auto_oportunidades': 0,
-            'diversos': 0,  # Contador de itens com múltiplas categorias
-            'by_table': {},
-            'oportunidades_reasons': {},
-            'diversos_combinations': {}  # Combinações de categorias em diversos
+            'diversos': 0,
+            'by_table': {}
         }
     
-    def _is_opportunity_item(self, item: Dict) -> tuple[bool, str]:
+    def _is_explicit_diversos(self, item: Dict) -> bool:
         """
-        Verifica se o item deve ir direto para 'oportunidades'
+        Verifica se o item deve ir para 'diversos' SEM usar Groq
+        Apenas para casos EXPLÍCITOS de lotes mistos
         
         Returns:
-            (bool, str): (é_oportunidade, motivo)
+            bool: True se for diversos explícito
         """
         title = item.get('title', '').lower()
         description = item.get('description', '').lower()
         text = f"{title} {description}"
         
-        # 1. ITENS COM LANCES (já tem competição)
-        total_bids = item.get('total_bids', 0) or 0
-        if total_bids > 0:
-            return True, f'tem_lances ({total_bids})'
-        
-        # 2. MUITOS COMPRADORES/LICITANTES
-        total_bidders = item.get('total_bidders', 0) or 0
-        if total_bidders >= 3:
-            return True, f'muitos_compradores ({total_bidders})'
-        
-        # 3. MUITAS UNIDADES (lotes com múltiplas unidades)
-        quantity_patterns = [
-            r'(\d+)\s*(?:unidades|unids?|peças|pçs|itens|produtos)',
-            r'lote\s+(?:com|de)\s+(\d+)',
-            r'quantidade[:\s]+(\d+)',
+        # Padrões EXPLÍCITOS de lotes diversos/mistos
+        diversos_patterns = [
+            r'itens?\s+diversos',
+            r'diversos\s+itens?',
+            r'lote\s+misto',
+            r'lote\s+variado',
+            r'mercadorias?\s+variadas?',
+            r'produtos?\s+variados?',
+            r'sortidos?',
+            r'mix\s+de',
+            r'lote\s+com\s+diversos',
+            r'varios\s+itens?',
+            r'variados',
         ]
         
-        for pattern in quantity_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                try:
-                    qty = int(match.group(1))
-                    if qty >= 10:
-                        return True, f'muitas_unidades ({qty})'
-                except:
-                    pass
+        for pattern in diversos_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
         
-        # 4. SEGUNDA PRAÇA
-        segunda_praca_keywords = [
-            'segunda praça',
-            '2ª praça',
-            '2a praça',
-            'segunda praca',
-            'novo pregão',
-            'nova tentativa',
-        ]
+        # Detecta combinações explícitas tipo "Notebook + Impressora"
+        # Procura por múltiplos itens separados por + ou ,
+        plus_pattern = r'(\w+)\s*\+\s*(\w+)'
+        if re.search(plus_pattern, title, re.IGNORECASE):
+            # Verifica se tem pelo menos 2 categorias diferentes mencionadas
+            categories_mentioned = []
+            title_lower = title.lower()
+            
+            # Palavras-chave de diferentes categorias
+            category_keywords = {
+                'tecnologia': ['notebook', 'tablet', 'smartphone', 'celular', 'computador', 'monitor'],
+                'eletrodomesticos': ['geladeira', 'fogao', 'lavadora', 'microondas', 'cafeteira'],
+                'moveis': ['mesa', 'cadeira', 'sofa', 'armario'],
+                'casa': ['panela', 'louça', 'copo', 'prato']
+            }
+            
+            for cat, keywords in category_keywords.items():
+                for keyword in keywords:
+                    if keyword in title_lower:
+                        categories_mentioned.append(cat)
+                        break
+            
+            # Se menciona 2+ categorias diferentes, é diversos
+            if len(set(categories_mentioned)) >= 2:
+                return True
         
-        for keyword in segunda_praca_keywords:
-            if keyword in text:
-                return True, 'segunda_praca'
-        
-        # 5. LOTES MISTOS (múltiplos itens diferentes)
-        lote_misto_keywords = [
-            'lote misto',
-            'lote variado',
-            'itens diversos',
-            'diversos itens',
-            'mercadorias variadas',
-            'produtos variados',
-            'sortidos',
-            'mix de',
-        ]
-        
-        for keyword in lote_misto_keywords:
-            if keyword in text:
-                return True, 'lote_misto'
-        
-        return False, ''
+        return False
     
     def classify(self, item: Dict) -> Optional[str]:
         """
@@ -232,63 +210,44 @@ class GroqTableClassifier:
             item: Dict com 'title' e opcionalmente 'description'
         
         Returns:
-            Nome da tabela (ex: 'tecnologia', 'veiculos', 'diversos') ou None se falhar
+            Nome da tabela (ex: 'tecnologia', 'veiculos') ou None se falhar
         """
         title = item.get('title', '').strip()
         description = item.get('description', '')[:500]
         
         if not title:
+            self.stats['failed'] += 1
+            self.stats['total'] += 1
             return None
         
-        # PRÉ-CLASSIFICAÇÃO: Verifica se é oportunidade automaticamente
-        is_opportunity, reason = self._is_opportunity_item(item)
-        
-        if is_opportunity:
-            self.stats['auto_oportunidades'] += 1
-            self.stats['by_table']['oportunidades'] = self.stats['by_table'].get('oportunidades', 0) + 1
-            self.stats['oportunidades_reasons'][reason] = self.stats['oportunidades_reasons'].get(reason, 0) + 1
+        # PRÉ-VERIFICAÇÃO: Verifica se é "diversos" explícito
+        if self._is_explicit_diversos(item):
+            self.stats['diversos'] += 1
+            self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
             self.stats['total'] += 1
-            return 'oportunidades'
+            return 'diversos'
         
-        # Classifica com Groq (agora pode retornar múltiplas categorias)
-        result = self._classify_with_groq(title, description)
+        # Classifica com Groq
+        table_name = self._classify_with_groq(title, description)
         
-        if result:
-            table_name, categories = result
-            
-            # Se tem múltiplas categorias, vai para 'diversos'
-            if len(categories) > 1:
-                self.stats['diversos'] += 1
-                self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
-                
-                # Registra a combinação de categorias
-                combo = '+'.join(sorted(categories))
-                self.stats['diversos_combinations'][combo] = self.stats['diversos_combinations'].get(combo, 0) + 1
-                
-                # Armazena as categorias no item para uso posterior
-                item['_categories'] = categories
-                item['_primary_category'] = categories[0]
-                
-                return 'diversos'
-            else:
-                # Categoria única - tabela específica
-                self.stats['success'] += 1
-                self.stats['by_table'][table_name] = self.stats['by_table'].get(table_name, 0) + 1
-                return table_name
+        if table_name:
+            self.stats['success'] += 1
+            self.stats['by_table'][table_name] = self.stats['by_table'].get(table_name, 0) + 1
+            self.stats['total'] += 1
+            return table_name
         
-        # Fallback
-        self.stats['failed'] += 1
+        # Fallback para diversos
+        self.stats['diversos'] += 1
+        self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
         self.stats['total'] += 1
-        return 'oportunidades'
+        return 'diversos'
     
-    def _classify_with_groq(self, title: str, description: str) -> Optional[Tuple[str, List[str]]]:
+    def _classify_with_groq(self, title: str, description: str) -> Optional[str]:
         """
-        Classifica com Groq e retorna (tabela_principal, lista_de_categorias)
+        Classifica com Groq e retorna a tabela
         
         Returns:
-            Tuple[str, List[str]] ou None se falhar
-            - str: nome da tabela principal
-            - List[str]: lista de todas as categorias aplicáveis
+            str: nome da tabela ou None se falhar
         """
         prompt = self._build_classification_prompt(title, description)
         
@@ -296,23 +255,19 @@ class GroqTableClassifier:
             response = self._call_groq(prompt)
             
             if response:
-                # Parse da resposta - pode ser "tecnologia" ou "tecnologia,eletrodomesticos"
+                # Parse da resposta - deve ser apenas uma categoria
                 response_clean = response.strip().lower()
                 
                 # Remove possíveis explicações extras
                 if '\n' in response_clean:
                     response_clean = response_clean.split('\n')[0]
                 
-                # Separa múltiplas categorias
-                categories = [cat.strip() for cat in response_clean.split(',')]
+                # Remove espaços e possíveis vírgulas/separadores
+                response_clean = response_clean.replace(',', '').replace(';', '').strip()
                 
-                # Valida todas as categorias
-                valid_categories = [cat for cat in categories if cat in self.TABLES_INFO and cat not in ['diversos', 'oportunidades']]
-                
-                if valid_categories:
-                    self.stats['success'] += 1
-                    self.stats['total'] += 1
-                    return valid_categories[0], valid_categories
+                # Valida se é uma tabela válida
+                if response_clean in self.TABLES_INFO:
+                    return response_clean
             
             return None
         
@@ -321,17 +276,17 @@ class GroqTableClassifier:
             return None
     
     def _build_classification_prompt(self, title: str, description: str) -> str:
-        """Monta o prompt para o Groq com suporte a múltiplas categorias"""
+        """Monta o prompt para o Groq"""
         
-        # Lista de tabelas (excluindo diversos e oportunidades do prompt)
+        # Lista de tabelas (incluindo diversos, mas com sua descrição especial)
         tables_list = []
         for table, info in self.TABLES_INFO.items():
-            if table not in ['diversos', 'oportunidades']:
-                tables_list.append(f"- {table}: {info['desc']} (ex: {info['exemplos']})")
+            tables_list.append(f"- {table}: {info['desc']}")
+            tables_list.append(f"  Exemplos: {info['exemplos']}")
         
         tables_text = "\n".join(tables_list)
         
-        prompt = f"""Você é um classificador de leilões. Analise o item e identifique TODAS as categorias que se aplicam.
+        prompt = f"""Você é um classificador de leilões brasileiro. Analise o item e identifique a categoria MAIS ESPECÍFICA.
 
 CATEGORIAS DISPONÍVEIS:
 {tables_text}
@@ -340,19 +295,19 @@ ITEM PARA CLASSIFICAR:
 Título: {title}
 Descrição: {description[:300] if description else 'Não disponível'}
 
-REGRAS IMPORTANTES:
-1. "veiculos" = QUALQUER forma de locomoção (bicicleta, patins, patinete, skate, scooter)
+REGRAS CRÍTICAS:
+1. "veiculos" = QUALQUER forma de locomoção (bicicleta, patins, patinete, skate, scooter, moto, carro)
 2. "nichados" = equipamentos especializados (odontológico, hospitalar, cozinha industrial, laboratório)
-3. "eletrodomesticos" = apenas uso residencial (fogão doméstico, geladeira doméstica)
-4. Se o item pertence a MÚLTIPLAS categorias, liste TODAS separadas por vírgula
-5. Exemplos de múltiplas categorias:
-   - Smart TV → tecnologia,eletrodomesticos
-   - Air Fryer Wi-Fi → tecnologia,eletrodomesticos
-   - Smartwatch → tecnologia,bens_consumo
-   - Geladeira Inteligente → tecnologia,eletrodomesticos
-6. Liste primeiro a categoria MAIS IMPORTANTE
+3. "eletrodomesticos" = linha branca residencial (geladeira, fogão, lavadora, micro-ondas, smart TV, air fryer)
+4. "tecnologia" = eletrônicos e informática (notebook, smartphone, tablet, computador, impressora)
+5. "diversos" = SOMENTE se o título/descrição indicar explicitamente "diversos itens" ou "lote misto"
+6. Smart TVs e Air Fryers inteligentes são "eletrodomesticos", não tecnologia
+7. Cafeteiras, liquidificadores, batedeiras são "eletrodomesticos"
+8. Se não tiver certeza entre duas categorias, escolha a MAIS ESPECÍFICA
 
-RESPONDA APENAS COM AS CATEGORIAS (uma ou mais, separadas por vírgula):"""
+IMPORTANTE: Responda com APENAS UMA categoria. Sem explicações, sem vírgulas, sem múltiplas opções.
+
+RESPOSTA (apenas o nome da categoria):"""
         
         return prompt
     
@@ -369,7 +324,7 @@ RESPONDA APENAS COM AS CATEGORIAS (uma ou mais, separadas por vírgula):"""
             "messages": [
                 {
                     "role": "system",
-                    "content": "Você é um classificador preciso. Responda com o nome da categoria ou múltiplas categorias separadas por vírgula. Sem explicações."
+                    "content": "Você é um classificador preciso de leilões. Responda APENAS com o nome da categoria. Uma palavra. Sem explicações."
                 },
                 {
                     "role": "user",
@@ -377,7 +332,7 @@ RESPONDA APENAS COM AS CATEGORIAS (uma ou mais, separadas por vírgula):"""
                 }
             ],
             "temperature": 0.1,
-            "max_tokens": 100,
+            "max_tokens": 50,
             "top_p": 0.9
         }
         
@@ -400,53 +355,19 @@ RESPONDA APENAS COM AS CATEGORIAS (uma ou mais, separadas por vírgula):"""
             print(f"⚠️ Erro na chamada Groq: {e}")
             return None
     
-    def get_item_categories(self, item: Dict) -> Tuple[str, Optional[List[str]]]:
-        """
-        Retorna a tabela e as categorias de um item já classificado
-        
-        Returns:
-            Tuple[str, Optional[List[str]]]: (tabela, lista_de_categorias)
-        """
-        # Primeiro classifica se ainda não foi
-        if '_categories' not in item:
-            table = self.classify(item)
-            if table != 'diversos':
-                return table, None
-        
-        # Se é diversos, retorna as categorias
-        if '_categories' in item:
-            return 'diversos', item['_categories']
-        
-        return 'oportunidades', None
-    
     def get_stats(self) -> Dict:
         """Retorna estatísticas de classificação"""
         return self.stats.copy()
     
     def print_stats(self):
-        """Imprime estatísticas"""
-        print("\n" + "="*70)
+        """Imprime estatísticas detalhadas"""
+        print("\n" + "="*80)
         print("📊 ESTATÍSTICAS DE CLASSIFICAÇÃO GROQ")
-        print("="*70)
+        print("="*80)
         print(f"Total processado: {self.stats['total']}")
         print(f"Sucesso (via Groq): {self.stats['success']} ({self.stats['success']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Auto-oportunidades: {self.stats['auto_oportunidades']} ({self.stats['auto_oportunidades']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"🎯 Diversos (múltiplas categorias): {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Diversos (pré-classificação): {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
         print(f"Falhas: {self.stats['failed']}")
-        
-        # Mostra motivos de oportunidades
-        if self.stats['oportunidades_reasons']:
-            print(f"\n💡 Motivos de Auto-Oportunidades:")
-            for reason, count in sorted(self.stats['oportunidades_reasons'].items(), key=lambda x: x[1], reverse=True):
-                pct = count / self.stats['auto_oportunidades'] * 100 if self.stats['auto_oportunidades'] > 0 else 0
-                print(f"  • {reason}: {count} ({pct:.1f}%)")
-        
-        # Mostra combinações de categorias em diversos
-        if self.stats['diversos_combinations']:
-            print(f"\n🎨 Combinações de Categorias (Diversos):")
-            for combo, count in sorted(self.stats['diversos_combinations'].items(), key=lambda x: x[1], reverse=True):
-                pct = count / self.stats['diversos'] * 100 if self.stats['diversos'] > 0 else 0
-                print(f"  • {combo}: {count} ({pct:.1f}%)")
         
         if self.stats['by_table']:
             # Organiza por pilar
@@ -456,23 +377,34 @@ RESPONDA APENAS COM AS CATEGORIAS (uma ou mais, separadas por vírgula):"""
                 by_pillar[pilar][table] = count
             
             pilar_names = {
-                1: "Pilar 1 (Varejo/Consumo)",
-                2: "Pilar 2 (Casa/Decoração)",
-                3: "Pilar 3 (Imóveis/Construção)",
-                4: "Pilar 4 (Especialidades/Diversos)"
+                1: "🛒 PILAR 1: Varejo e Consumo Direto",
+                2: "🏠 PILAR 2: Casa e Decoração",
+                3: "🏗️  PILAR 3: Imóveis e Construção",
+                4: "🎯 PILAR 4: Especialidades e Diversos"
             }
             
-            print(f"\n📦 Distribuição por Pilar e Tabela:")
+            print(f"\n📦 DISTRIBUIÇÃO POR PILAR E TABELA:")
+            print("-" * 80)
+            
             for pilar_num in [1, 2, 3, 4]:
                 if by_pillar[pilar_num]:
                     pilar_total = sum(by_pillar[pilar_num].values())
                     pilar_pct = pilar_total / self.stats['total'] * 100
-                    print(f"\n  🏛️  {pilar_names[pilar_num]}: {pilar_total} ({pilar_pct:.1f}%)")
+                    print(f"\n{pilar_names[pilar_num]}")
+                    print(f"Total: {pilar_total} itens ({pilar_pct:.1f}%)")
+                    print("-" * 80)
+                    
                     for table, count in sorted(by_pillar[pilar_num].items(), key=lambda x: x[1], reverse=True):
                         pct = count / self.stats['total'] * 100
-                        emoji = "🎯" if table == 'diversos' else "  "
-                        print(f"      {emoji} {table}: {count} ({pct:.1f}%)")
-        print("="*70)
+                        bar_length = int(pct / 2)  # Escala a barra
+                        bar = "█" * bar_length
+                        
+                        # Emoji especial para diversos
+                        emoji = "🎨" if table == 'diversos' else "  "
+                        
+                        print(f"{emoji} {table:.<35} {count:>6} ({pct:>5.1f}%) {bar}")
+        
+        print("="*80)
 
 
 # Função auxiliar para uso fácil
@@ -487,83 +419,124 @@ def classify_item_to_table(item: Dict) -> str:
         Nome da tabela (string)
     """
     classifier = GroqTableClassifier()
-    return classifier.classify(item) or 'oportunidades'
+    return classifier.classify(item) or 'diversos'
 
 
 if __name__ == "__main__":
-    # Teste focado em itens com múltiplas categorias
+    print("\n🤖 TESTANDO CLASSIFICADOR GROQ - VERSÃO REFATORADA\n")
+    print("="*80)
+    
     classifier = GroqTableClassifier()
     
     test_items = [
-        # ✅ ITENS COM MÚLTIPLAS CATEGORIAS (devem ir para 'diversos')
+        # ==================== DIVERSOS (EXPLÍCITOS) ====================
         {
-            "title": "Smart TV Samsung 55' 4K com Wi-Fi",
-            "description": "Televisão inteligente com sistema operacional e conectividade",
-            "total_bids": 0
+            "title": "Lote com Itens Diversos",
+            "description": "Vários produtos de diferentes categorias"
         },
         {
-            "title": "Air Fryer Philips Walita com App e Wi-Fi",
-            "description": "Fritadeira elétrica inteligente controlada por smartphone",
-            "total_bids": 0
+            "title": "Lote Misto de Mercadorias",
+            "description": "Produtos variados"
         },
         {
-            "title": "Geladeira Brastemp Inverse com Alexa",
-            "description": "Geladeira inteligente com assistente virtual integrado",
-            "total_bids": 0
+            "title": "Kit: Notebook Dell + Impressora HP + Mouse Logitech",
+            "description": "Combo de equipamentos de informática"
         },
         {
-            "title": "Smartwatch Samsung Galaxy Watch 5",
-            "description": "Relógio inteligente com múltiplas funções",
-            "total_bids": 0
-        },
-        {
-            "title": "Robô Aspirador Xiaomi com App",
-            "description": "Aspirador robótico inteligente controlado por celular",
-            "total_bids": 0
+            "title": "Cafeteira Philips + Tablet Samsung + Fones JBL",
+            "description": "Lote combinado"
         },
         
-        # ✅ ITENS DE CATEGORIA ÚNICA (devem ir para tabela específica)
+        # ==================== ELETRODOMÉSTICOS ====================
+        {
+            "title": "Smart TV Samsung 55 Polegadas 4K",
+            "description": "Televisão inteligente com sistema operacional"
+        },
+        {
+            "title": "Air Fryer Philips Walita com Conectividade",
+            "description": "Fritadeira elétrica com app"
+        },
+        {
+            "title": "Geladeira Brastemp Inverse",
+            "description": "Geladeira frost free"
+        },
+        {
+            "title": "Micro-ondas Electrolux 30L",
+            "description": "Micro-ondas com grill"
+        },
+        {
+            "title": "Cafeteira Nespresso Inissia",
+            "description": "Máquina de café expresso"
+        },
+        
+        # ==================== TECNOLOGIA ====================
         {
             "title": "Notebook Dell Inspiron 15",
-            "description": "Notebook com 8GB RAM",
-            "total_bids": 0
+            "description": "Notebook com Intel Core i5 e 8GB RAM"
         },
         {
-            "title": "Geladeira Consul 400L",
-            "description": "Geladeira tradicional sem recursos inteligentes",
-            "total_bids": 0
+            "title": "iPhone 13 Pro Max 256GB",
+            "description": "Smartphone Apple"
         },
         {
-            "title": "Bicicleta Caloi Mountain Bike",
-            "description": "Bicicleta aro 29",
-            "total_bids": 0
+            "title": "iPad 9ª Geração",
+            "description": "Tablet Apple com 64GB"
+        },
+        {
+            "title": "Impressora HP LaserJet Pro",
+            "description": "Impressora multifuncional"
         },
         
-        # ✅ OPORTUNIDADES (com lances)
+        # ==================== VEÍCULOS ====================
         {
-            "title": "iPhone 13 Pro Max",
-            "description": "Smartphone Apple",
-            "total_bids": 5
+            "title": "Bicicleta Caloi Mountain Bike Aro 29",
+            "description": "Bicicleta 21 marchas"
+        },
+        {
+            "title": "Patinete Elétrico Xiaomi",
+            "description": "Patinete com autonomia de 30km"
+        },
+        {
+            "title": "Civic 2020 Automático",
+            "description": "Honda Civic completo"
+        },
+        
+        # ==================== MÓVEIS ====================
+        {
+            "title": "Sofá 3 Lugares Retrátil",
+            "description": "Sofá em tecido cinza"
+        },
+        {
+            "title": "Mesa de Jantar 6 Cadeiras",
+            "description": "Conjunto completo"
+        },
+        
+        # ==================== NICHADOS ====================
+        {
+            "title": "Cadeira Odontológica Kavo",
+            "description": "Equipamento odontológico completo"
+        },
+        {
+            "title": "Autoclave Cristofoli 21L",
+            "description": "Autoclave para esterilização"
+        },
+        {
+            "title": "Fogão Industrial 6 Bocas",
+            "description": "Fogão profissional para cozinha comercial"
         },
     ]
     
-    print("\n🤖 TESTANDO CLASSIFICADOR COM MÚLTIPLAS CATEGORIAS\n")
-    print("="*80)
+    print("\n🔍 CLASSIFICANDO ITENS DE TESTE...\n")
     
-    for item in test_items:
+    for i, item in enumerate(test_items, 1):
         table = classifier.classify(item)
         
-        # Mostra as categorias se for 'diversos'
-        categories_str = ""
-        if table == 'diversos' and '_categories' in item:
-            categories_str = f" → Categorias: {', '.join(item['_categories'])}"
-        
-        bids_info = f" [Lances: {item.get('total_bids', 0)}]" if item.get('total_bids', 0) > 0 else ""
-        
-        # Emoji baseado no resultado
-        emoji = "🎯" if table == 'diversos' else "✅" if table != 'oportunidades' else "💡"
-        
-        print(f"{emoji} '{item['title'][:60]}'{bids_info}")
-        print(f"   └─ Tabela: {table}{categories_str}\n")
+        print(f"{i:02d}. '{item['title'][:65]}'")
+        print(f"    └─ 📂 Tabela: {table}")
+        print()
     
+    # Imprime estatísticas
     classifier.print_stats()
+    
+    print("\n✅ Teste concluído!")
+    print("="*80)

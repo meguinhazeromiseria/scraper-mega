@@ -50,6 +50,9 @@ class SupabaseClient:
             print("  ⚠️ Nenhum item válido para inserir")
             return {'inserted': 0, 'updated': 0, 'errors': 0}
         
+        # 🔧 Normaliza chaves do batch (todos devem ter mesmas chaves)
+        prepared = self._normalize_batch_keys(prepared)
+        
         stats = {'inserted': 0, 'updated': 0, 'errors': 0}
         batch_size = 500
         total_batches = (len(prepared) + batch_size - 1) // batch_size
@@ -82,6 +85,26 @@ class SupabaseClient:
                 time.sleep(0.5)
         
         return stats
+    
+    def _normalize_batch_keys(self, items: list) -> list:
+        """Garante que todos os itens tenham exatamente as mesmas chaves"""
+        if not items:
+            return items
+        
+        # Coleta todas as chaves únicas do batch
+        all_keys = set()
+        for item in items:
+            all_keys.update(item.keys())
+        
+        # Normaliza cada item para ter todas as chaves
+        normalized = []
+        for item in items:
+            normalized_item = {}
+            for key in all_keys:
+                normalized_item[key] = item.get(key, None)
+            normalized.append(normalized_item)
+        
+        return normalized
     
     def _prepare(self, item: dict, tabela: str = '') -> dict:
         """Prepara item para inserção no banco"""
