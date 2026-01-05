@@ -50,8 +50,8 @@ class SupabaseClient:
             print("  ⚠️ Nenhum item válido para inserir")
             return {'inserted': 0, 'updated': 0, 'errors': 0}
         
-        # 🔧 Normaliza chaves do batch (todos devem ter mesmas chaves)
-        prepared = self._normalize_batch_keys(prepared)
+        # 🔧 Normaliza chaves do batch (remove campos inválidos por tabela)
+        prepared = self._normalize_batch_keys(prepared, tabela)
         
         stats = {'inserted': 0, 'updated': 0, 'errors': 0}
         batch_size = 500
@@ -86,17 +86,43 @@ class SupabaseClient:
         
         return stats
     
-    def _normalize_batch_keys(self, items: list) -> list:
-        """Garante que todos os itens tenham exatamente as mesmas chaves"""
+    def _normalize_batch_keys(self, items: list, tabela: str = '') -> list:
+        """Garante que todos os itens tenham apenas campos válidos para a tabela"""
         if not items:
             return items
         
-        # Coleta todas as chaves únicas do batch
+        # Campos padrão presentes em TODAS as tabelas
+        standard_fields = {
+            'source', 'external_id', 'title', 'normalized_title', 'description_preview',
+            'description', 'value', 'value_text', 'city', 'state', 'address',
+            'auction_date', 'days_remaining', 'auction_type', 'auction_name',
+            'store_name', 'lot_number', 'total_visits', 'total_bids', 'total_bidders',
+            'link', 'metadata', 'duplicate_group', 'is_primary_duplicate',
+            'is_active', 'created_at', 'updated_at', 'last_scraped_at',
+            'market_price', 'market_price_source', 'market_price_updated_at',
+            'market_price_confidence', 'market_price_metadata'
+        }
+        
+        # Campos específicos por tabela
+        table_specific_fields = {
+            'veiculos': {'vehicle_type'},
+            'tecnologia': {'multiplecategory'},
+            # Outras tabelas só têm campos padrão
+        }
+        
+        # Campos permitidos para esta tabela
+        allowed_fields = standard_fields.copy()
+        if tabela in table_specific_fields:
+            allowed_fields.update(table_specific_fields[tabela])
+        
+        # Coleta todas as chaves válidas do batch
         all_keys = set()
         for item in items:
-            all_keys.update(item.keys())
+            for key in item.keys():
+                if key in allowed_fields:
+                    all_keys.add(key)
         
-        # Normaliza cada item para ter todas as chaves
+        # Normaliza cada item para ter todas as chaves válidas
         normalized = []
         for item in items:
             normalized_item = {}
@@ -174,37 +200,12 @@ class SupabaseClient:
             'last_scraped_at': datetime.now().isoformat(),
         }
         
-        # ✅ Campos extras que vêm do item (qualquer um)
-        # Se o scraper ou normalizer adicionou campos extras, preserva
-        extra_fields = [
-            'vehicle_type',      # veículos
-            'tech_category',     # tecnologia
-            'tech_brand',        # tecnologia
-            'tech_model',        # tecnologia
-            'tech_condition',    # tecnologia
-            'tech_specs',        # tecnologia
-            'property_type',     # imóveis
-            'area_m2',          # imóveis
-            'bedrooms',         # imóveis
-            'bathrooms',        # imóveis
-            'quantity',         # oportunidades/lotes
-            'unit_price',       # oportunidades
-            'condition',        # genérico
-            'brand',            # genérico
-            'model',            # genérico
-            'year',             # genérico
-        ]
+        # ✅ Campos específicos por tabela
+        if tabela == 'veiculos' and 'vehicle_type' in item:
+            data['vehicle_type'] = str(item['vehicle_type'])[:255] if item['vehicle_type'] else None
         
-        for field in extra_fields:
-            if field in item and item[field] is not None:
-                value = item[field]
-                # Converte para tipo apropriado
-                if isinstance(value, (int, float)):
-                    data[field] = value
-                elif isinstance(value, dict):
-                    data[field] = value
-                else:
-                    data[field] = str(value)[:255] if len(str(value)) <= 255 else str(value)[:255]
+        if tabela == 'tecnologia' and 'multiplecategory' in item:
+            data['multiplecategory'] = item['multiplecategory'] if isinstance(item['multiplecategory'], list) else None
         
         return data
     

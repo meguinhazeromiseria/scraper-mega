@@ -65,12 +65,29 @@ class UniversalNormalizer:
             # Link
             'link': item.get('link'),
             
-            # Metadata original (preserva TUDO)
-            'metadata': item.get('metadata', {}),
-            
-            # Campos extras (se existirem, passa direto)
-            **self._extract_extra_fields(item)
+            # Metadata (preserva campos originais + campos extras dentro do JSON)
+            # ✅ Campos específicos agora ficam DENTRO do metadata, não no root
+            'metadata': self._build_metadata(item),
         }
+    
+    def _build_metadata(self, item: dict) -> dict:
+        """Constrói metadata preservando campos originais e extras"""
+        metadata = item.get('metadata', {}).copy() if isinstance(item.get('metadata'), dict) else {}
+        
+        # Campos extras vão pro metadata (não como campos root do item)
+        # Isso evita erros no Supabase quando campos específicos vão pra tabelas erradas
+        extra_fields = [
+            'vehicle_type', 'tech_category', 'tech_brand', 'tech_model',
+            'tech_condition', 'tech_specs', 'property_type', 'area_m2',
+            'bedrooms', 'bathrooms', 'quantity', 'unit_price',
+            'condition', 'brand', 'model', 'year', 'raw_category'
+        ]
+        
+        for field in extra_fields:
+            if field in item and item[field] is not None:
+                metadata[field] = item[field]
+        
+        return metadata
     
     def _clean_title(self, title: Optional[str]) -> str:
         """Limpa título removendo prefixos e formatação desnecessária"""
@@ -80,7 +97,7 @@ class UniversalNormalizer:
         clean = str(title).strip()
         
         # Remove "LOTE XX" do início
-        clean = re.sub(r'^LOTE\s+\d+\s*[-:–—]?\s*', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'^LOTE\s+\d+\s*[-:—–]?\s*', '', clean, flags=re.IGNORECASE)
         
         # Remove HTML tags
         clean = re.sub(r'<[^>]+>', '', clean)
@@ -284,37 +301,6 @@ class UniversalNormalizer:
             return int(value)
         except:
             return default
-    
-    def _extract_extra_fields(self, item: dict) -> dict:
-        """Extrai campos extras que podem existir (vehicle_type, tech_category, etc)"""
-        extra_fields = {}
-        
-        # Lista de campos opcionais conhecidos
-        optional_fields = [
-            'vehicle_type',      # veículos
-            'tech_category',     # tecnologia
-            'tech_brand',
-            'tech_model',
-            'tech_condition',
-            'tech_specs',
-            'property_type',     # imóveis
-            'area_m2',
-            'bedrooms',
-            'bathrooms',
-            'quantity',          # lotes
-            'unit_price',
-            'condition',         # genérico
-            'brand',
-            'model',
-            'year',
-            'raw_category',      # categoria original do site
-        ]
-        
-        for field in optional_fields:
-            if field in item and item[field] is not None:
-                extra_fields[field] = item[field]
-        
-        return extra_fields
 
 
 def normalize_items(items: List[dict]) -> List[dict]:

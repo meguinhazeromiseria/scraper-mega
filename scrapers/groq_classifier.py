@@ -140,6 +140,7 @@ class GroqTableClassifier:
             'success': 0,
             'failed': 0,
             'diversos': 0,
+            'pre_classified_vehicles': 0,
             'by_table': {}
         }
     
@@ -155,19 +156,18 @@ class GroqTableClassifier:
         description = item.get('description', '').lower()
         text = f"{title} {description}"
         
-        # Padrões EXPLÍCITOS de lotes diversos/mistos
+        # Padrões EXPLÍCITOS de lotes diversos/mistos (bem específicos!)
         diversos_patterns = [
-            r'itens?\s+diversos',
-            r'diversos\s+itens?',
-            r'lote\s+misto',
-            r'lote\s+variado',
-            r'mercadorias?\s+variadas?',
-            r'produtos?\s+variados?',
-            r'sortidos?',
-            r'mix\s+de',
-            r'lote\s+com\s+diversos',
-            r'varios\s+itens?',
-            r'variados',
+            r'\bitens?\s+diversos\b',
+            r'\bdiversos\s+itens?\b',
+            r'\blote\s+misto\b',
+            r'\blote\s+variado\b',
+            r'\bmercadorias?\s+variadas?\b',
+            r'\bprodutos?\s+variados?\b',
+            r'\bmix\s+de\b',
+            r'\blote\s+com\s+diversos\b',
+            r'\bvarios\s+itens?\b',
+            r'\blote\s+de\s+produtos?\s+variados?\b',
         ]
         
         for pattern in diversos_patterns:
@@ -202,6 +202,62 @@ class GroqTableClassifier:
         
         return False
     
+    def _is_obvious_vehicle(self, item: Dict) -> bool:
+        """
+        Detecta veículos óbvios sem precisar chamar Groq
+        
+        Returns:
+            bool: True se for veículo óbvio
+        """
+        title = item.get('title', '').lower()
+        
+        # Marcas de veículos
+        vehicle_brands = [
+            'fiat', 'volkswagen', 'vw', 'ford', 'chevrolet', 'gm',
+            'honda', 'toyota', 'hyundai', 'nissan', 'renault',
+            'peugeot', 'citroen', 'jeep', 'mitsubishi', 'suzuki',
+            'yamaha', 'kawasaki', 'bmw', 'mercedes', 'audi',
+            'volvo', 'scania', 'iveco', 'mercedes-benz'
+        ]
+        
+        # Modelos comuns
+        vehicle_models = [
+            'civic', 'corolla', 'gol', 'uno', 'palio', 'celta',
+            'onix', 'hb20', 'ka', 'fiesta', 'sandero', 'logan',
+            'cg 150', 'cg 160', 'fan', 'titan', 'factor', 'biz'
+        ]
+        
+        # Palavras-chave de veículos
+        vehicle_keywords = [
+            'carro', 'moto', 'caminhao', 'caminhão', 'onibus', 'ônibus',
+            'motocicleta', 'automovel', 'automóvel', 'veiculo', 'veículo',
+            'pickup', 'van', 'kombi', 'bicicleta', 'bike', 'patinete',
+            'scooter', 'jet ski', 'lancha', 'barco', 'aeronave'
+        ]
+        
+        # Verifica marcas
+        for brand in vehicle_brands:
+            if brand in title:
+                return True
+        
+        # Verifica modelos
+        for model in vehicle_models:
+            if model in title:
+                return True
+        
+        # Verifica palavras-chave
+        for keyword in vehicle_keywords:
+            if keyword in title:
+                return True
+        
+        # Padrão de ano (ex: "2020", "2015/2016")
+        if re.search(r'\b(19|20)\d{2}\b', title):
+            # Se tem ano, verifica se não é imóvel
+            if not any(word in title for word in ['apartamento', 'casa', 'terreno', 'sala', 'lote']):
+                return True
+        
+        return False
+    
     def classify(self, item: Dict) -> Optional[str]:
         """
         Classifica um item e retorna o nome da tabela
@@ -220,12 +276,25 @@ class GroqTableClassifier:
             self.stats['total'] += 1
             return None
         
-        # PRÉ-VERIFICAÇÃO: Verifica se é "diversos" explícito
+        # PRÉ-VERIFICAÇÃO 1: Verifica se é "diversos" explícito
         if self._is_explicit_diversos(item):
             self.stats['diversos'] += 1
             self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
             self.stats['total'] += 1
+            # Debug primeiros diversos
+            if self.stats['diversos'] <= 10:
+                print(f"  🎨 Diversos detectado: '{title[:70]}'")
             return 'diversos'
+        
+        # PRÉ-VERIFICAÇÃO 2: Verifica se é veículo óbvio
+        if self._is_obvious_vehicle(item):
+            self.stats['pre_classified_vehicles'] += 1
+            self.stats['by_table']['veiculos'] = self.stats['by_table'].get('veiculos', 0) + 1
+            self.stats['total'] += 1
+            # Debug primeiros veículos
+            if self.stats['pre_classified_vehicles'] <= 10:
+                print(f"  ✅ Veículo detectado: '{title[:70]}'")
+            return 'veiculos'
         
         # Classifica com Groq
         table_name = self._classify_with_groq(title, description)
@@ -295,17 +364,37 @@ ITEM PARA CLASSIFICAR:
 Título: {title}
 Descrição: {description[:300] if description else 'Não disponível'}
 
-REGRAS CRÍTICAS:
-1. "veiculos" = QUALQUER forma de locomoção (bicicleta, patins, patinete, skate, scooter, moto, carro)
-2. "nichados" = equipamentos especializados (odontológico, hospitalar, cozinha industrial, laboratório)
-3. "eletrodomesticos" = linha branca residencial (geladeira, fogão, lavadora, micro-ondas, smart TV, air fryer)
-4. "tecnologia" = eletrônicos e informática (notebook, smartphone, tablet, computador, impressora)
-5. "diversos" = SOMENTE se o título/descrição indicar explicitamente "diversos itens" ou "lote misto"
-6. Smart TVs e Air Fryers inteligentes são "eletrodomesticos", não tecnologia
-7. Cafeteiras, liquidificadores, batedeiras são "eletrodomesticos"
-8. Se não tiver certeza entre duas categorias, escolha a MAIS ESPECÍFICA
+REGRAS CRÍTICAS - LEIA COM ATENÇÃO:
 
-IMPORTANTE: Responda com APENAS UMA categoria. Sem explicações, sem vírgulas, sem múltiplas opções.
+🚗 VEÍCULOS (PRIORIDADE MÁXIMA):
+- Carros, motos, caminhões, ônibus → SEMPRE "veiculos"
+- Bicicletas, patins, patinetes, skates → SEMPRE "veiculos"
+- Se mencionar marca (Fiat, VW, Honda, Yamaha, Ford, etc) → "veiculos"
+- Se mencionar modelo (Civic, Gol, Corolla, CG, etc) → "veiculos"
+- Se mencionar ano do veículo → "veiculos"
+- Qualquer coisa que serve para locomoção → "veiculos"
+
+🏠 IMÓVEIS:
+- Casas, apartamentos, terrenos, lotes → "imoveis"
+- Nunca confunda imóveis com veículos
+
+🔧 NICHADOS (equipamentos especializados):
+- Odontológico, hospitalar, laboratório → "nichados"
+- Cozinha industrial, fogão industrial → "nichados"
+
+📺 ELETRODOMÉSTICOS vs TECNOLOGIA:
+- Smart TV, geladeira, fogão, lavadora → "eletrodomesticos"
+- Air Fryer, cafeteira, micro-ondas → "eletrodomesticos"
+- Notebook, tablet, smartphone, impressora → "tecnologia"
+
+🎯 DIVERSOS:
+- SOMENTE se título diz "lote misto" ou "itens diversos"
+- Se tem categoria clara, NÃO use diversos
+
+IMPORTANTE: 
+- Responda APENAS o nome da categoria
+- Uma palavra, sem explicação
+- Em caso de dúvida entre 2 categorias, escolha a MAIS ESPECÍFICA
 
 RESPOSTA (apenas o nome da categoria):"""
         
@@ -331,7 +420,7 @@ RESPOSTA (apenas o nome da categoria):"""
                     "content": prompt
                 }
             ],
-            "temperature": 0.1,
+            "temperature": 0,
             "max_tokens": 50,
             "top_p": 0.9
         }
@@ -366,6 +455,7 @@ RESPOSTA (apenas o nome da categoria):"""
         print("="*80)
         print(f"Total processado: {self.stats['total']}")
         print(f"Sucesso (via Groq): {self.stats['success']} ({self.stats['success']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Veículos (pré-classificação): {self.stats['pre_classified_vehicles']} ({self.stats['pre_classified_vehicles']/max(self.stats['total'],1)*100:.1f}%)")
         print(f"Diversos (pré-classificação): {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
         print(f"Falhas: {self.stats['failed']}")
         
