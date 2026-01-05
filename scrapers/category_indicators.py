@@ -121,7 +121,9 @@ TABLES_INFO = {
                     'valvula industrial', 'maquina cnc', 'serra industrial',
                     'furadeira industrial', 'lixadeira industrial', 'esmerilhadeira',
                     'injetora', 'extrusora', 'caldeira', 'forno industrial',
-                    'equipamento de producao', 'linha de producao', 'esteira']
+                    'equipamento de producao', 'linha de producao', 'esteira',
+                    'compactador', 'compactador de lixo', 'coletor de lixo',
+                    'equipamento coleta', 'caminhao compactador']
     },
     'maquinas_pesadas_agricolas': {
         'desc': 'Máquinas pesadas e agrícolas',
@@ -134,9 +136,9 @@ TABLES_INFO = {
     
     # ========== ESPECIALIDADES ==========
     'nichados': {
-        'desc': 'Equipamentos especializados (médico, odonto, veterinário, estética, cozinha profissional)',
+        'desc': 'Equipamentos especializados (médico, odonto, veterinário, estética, cozinha profissional, farmácia)',
         'keywords': [
-            # ODONTOLÓGICO (REFORÇADO!)
+            # ODONTOLÓGICO
             'odontologico', 'odontologica', 'cadeira odontologica', 'raio-x dental',
             'raio x odontologico', 'autoclave', 'dentista', 'consultorio odontologico',
             'armario odontologico', 'bancada odontologica', 'mocho odontologico',
@@ -148,6 +150,11 @@ TABLES_INFO = {
             'medico', 'hospitalar', 'clinica', 'maca', 'mesa cirurgica',
             'bisturi', 'estetoscopio', 'equipamento medico', 'desfibrilador',
             'monitor de sinais', 'oximetro', 'esfigmomanometro',
+            # FARMÁCIA/MEDICAMENTOS (NOVO!)
+            'medicamento', 'medicamentos', 'farmacia', 'farmaceutico',
+            'produto de higiene', 'higiene hospitalar', 'produto hospitalar',
+            'vitamina', 'vitaminas', 'suplemento medicinal', 'remedio',
+            'produto de saude', 'insumo medico', 'material hospitalar',
             # VETERINÁRIO
             'veterinario', 'maquina veterinaria', 'gaiola veterinaria',
             'mesa veterinaria', 'clinica veterinaria',

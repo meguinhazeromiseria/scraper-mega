@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 GROQ TABLE CLASSIFIER - Classificador Inteligente de Tabelas
-🤖 Usa Groq AI para decidir em qual tabela cada item deve ser inserido
-✨ Versão refatorada - MENOS regex, MAIS inteligência
+🤖 Groq AI como CÉREBRO principal - mínimo de regex
+✨ Versão ULTRA-INTELIGENTE
 """
 
 import json
@@ -25,7 +25,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 class GroqTableClassifier:
-    """Classificador que USA Groq para quase tudo"""
+    """Classificador que CONFIA no Groq para 99% das decisões"""
     
     def __init__(self):
         self.api_key = GROQ_API_KEY
@@ -45,24 +45,24 @@ class GroqTableClassifier:
     
     def _is_financial_abstract(self, item: Dict) -> bool:
         """
-        Detecta itens FINANCEIROS/ABSTRATOS que devem ir para diversos.
-        ÚNICO filtro pré-Groq que bloqueia classificação.
+        ÚNICO bloqueio pré-Groq: itens financeiros/abstratos.
+        Estes não têm categoria física, então sempre vão para diversos.
         """
         text = f"{item.get('normalized_title', '')} {item.get('description', '')}".lower()
         return any(kw in text for kw in FINANCIAL_ABSTRACT_KEYWORDS)
     
     def _is_obvious_mixed_lot(self, item: Dict) -> bool:
         """
-        Detecta lotes OBVIAMENTE mistos no título.
+        Detecta APENAS lotes MUITO ÓBVIOS no título.
         Ex: "TVs, Geladeiras, Micro-ondas, Bebedouro e Telefone"
         """
         title = item.get('normalized_title', '').lower()
         
-        # Detecta múltiplos itens separados por vírgula
+        # Detecta múltiplos itens separados por vírgula (3+)
         if not re.search(r'\w+\s*,\s*\w+.*,\s*\w+', title):
             return False
         
-        # Verifica se são categorias diferentes
+        # Verifica se são categorias MUITO diferentes
         categories_found = set()
         
         for category, indicators in MIXED_LOT_CATEGORY_INDICATORS.items():
@@ -73,13 +73,13 @@ class GroqTableClassifier:
     
     def classify(self, item: Dict) -> Optional[str]:
         """
-        Classifica um item e retorna o nome da tabela.
+        Classifica um item - GROQ FAZ QUASE TUDO.
         
-        Fluxo SIMPLIFICADO:
-        1. Verifica se é financeiro/abstrato → diversos
-        2. Verifica se é lote misto óbvio → diversos
-        3. USA GROQ para TUDO o resto
-        4. Fallback → diversos (se Groq falhar)
+        Fluxo ULTRA-SIMPLIFICADO:
+        1. Bloqueia financeiros → diversos
+        2. Detecta mistos óbvios → diversos
+        3. GROQ DECIDE TUDO → categoria específica ou diversos
+        4. Fallback → diversos
         """
         title = item.get('normalized_title', '').strip()
         description = item.get('description', '')[:500]
@@ -89,7 +89,7 @@ class GroqTableClassifier:
             self.stats['total'] += 1
             return None
         
-        # 1️⃣ BLOQUEIA FINANCEIROS/ABSTRATOS
+        # 1️⃣ BLOQUEIA FINANCEIROS/ABSTRATOS (único caso óbvio)
         if self._is_financial_abstract(item):
             self.stats['financial_blocked'] += 1
             self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
@@ -100,7 +100,7 @@ class GroqTableClassifier:
             
             return 'diversos'
         
-        # 2️⃣ DETECTA LOTES MISTOS ÓBVIOS
+        # 2️⃣ DETECTA MISTOS MUITO ÓBVIOS (ex: "TVs, geladeiras, telefones")
         if self._is_obvious_mixed_lot(item):
             self.stats['mixed_detected'] += 1
             self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
@@ -111,28 +111,28 @@ class GroqTableClassifier:
             
             return 'diversos'
         
-        # 3️⃣ DELEGA TUDO PARA O GROQ
+        # 3️⃣ GROQ DECIDE (99% dos casos)
         table_name = self._classify_with_groq(title, description)
         
-        if table_name and table_name != 'diversos':
+        if table_name:
             self.stats['groq_classifications'] += 1
             self.stats['by_table'][table_name] = self.stats['by_table'].get(table_name, 0) + 1
             self.stats['total'] += 1
             
-            if self.stats['groq_classifications'] <= 8:
+            if self.stats['groq_classifications'] <= 10:
                 print(f"  🤖 {table_name}: '{title[:55]}'")
             
             return table_name
         
-        # 4️⃣ FALLBACK (se Groq falhar)
+        # 4️⃣ FALLBACK (se Groq falhar completamente)
         self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
         self.stats['total'] += 1
         
         return 'diversos'
     
     def _classify_with_groq(self, title: str, description: str) -> Optional[str]:
-        """Classifica com Groq - agora com prompt MELHORADO"""
-        prompt = self._build_smart_prompt(title, description)
+        """Classifica com Groq - prompt MUITO melhorado"""
+        prompt = self._build_ultra_smart_prompt(title, description)
         
         try:
             response = self._call_groq(prompt)
@@ -140,11 +140,13 @@ class GroqTableClassifier:
             if response:
                 response_clean = response.strip().lower()
                 
+                # Remove lixo
                 if '\n' in response_clean:
                     response_clean = response_clean.split('\n')[0]
                 
                 response_clean = response_clean.replace(',', '').replace(';', '').strip()
                 
+                # Valida se é tabela válida
                 if response_clean in TABLES_INFO:
                     return response_clean
             
@@ -154,10 +156,10 @@ class GroqTableClassifier:
             print(f"⚠️ Erro Groq: {e}")
             return None
     
-    def _build_smart_prompt(self, title: str, description: str) -> str:
+    def _build_ultra_smart_prompt(self, title: str, description: str) -> str:
         """
-        Prompt INTELIGENTE para Groq.
-        Foca em EXEMPLOS ao invés de keywords.
+        Prompt ULTRA-DETALHADO com exemplos concretos.
+        O Groq precisa entender CONTEXTO, não apenas keywords.
         """
         
         tables_list = "\n".join([
@@ -165,56 +167,125 @@ class GroqTableClassifier:
             for table, info in TABLES_INFO.items()
         ])
         
-        prompt = f"""Você é um classificador de leilões. Identifique a categoria MAIS ESPECÍFICA baseando-se no CONTEXTO e FUNÇÃO do item.
+        prompt = f"""Você é um especialista em classificação de leilões. Analise o item abaixo e escolha a categoria MAIS ESPECÍFICA baseando-se no CONTEXTO e USO REAL do item.
 
 CATEGORIAS DISPONÍVEIS:
 {tables_list}
 
 ITEM PARA CLASSIFICAR:
 Título: {title}
-Descrição: {description[:300] if description else 'N/A'}
+Descrição: {description[:400] if description else 'N/A'}
 
-REGRAS DE DECISÃO (use BOM SENSO, não apenas palavras-chave):
+====================================
+REGRAS DE CLASSIFICAÇÃO (DETALHADAS)
+====================================
 
-🔍 PRIORIDADE 1 - ESPECIALIDADES (nichados):
-- Equipamento de consultório médico/odontológico → "nichados"
-  Ex: cadeira odontológica, raio-x dental, autoclave, maca
-- Equipamento de cozinha INDUSTRIAL/PROFISSIONAL → "nichados"
-  Ex: fogão industrial 6 bocas, geladeira industrial, forno combinado
-- Equipamento veterinário, estética, laboratório → "nichados"
+🥼 PRIORIDADE 1 - NICHADOS (equipamentos profissionais especializados):
 
-🏠 PRIORIDADE 2 - MÓVEIS vs UTILIDADES:
-- Móvel é algo em que você SENTA, GUARDA coisas, ou DECORA → "moveis_decoracao"
-  Ex: sofá, mesa, cadeira, armário, estante, rack, cama
-- Utensílio é algo que você USA para cozinhar/comer → "casa_utilidades"
-  Ex: panela, prato, copo, talher
+A) SAÚDE/FARMÁCIA:
+   ✅ Medicamentos, vitaminas, produtos de higiene HOSPITALAR → "nichados"
+   ✅ Lotes de farmácia, drogaria, produtos de saúde → "nichados"
+   ✅ Equipamentos médicos, odontológicos, veterinários → "nichados"
+   
+   Exemplos:
+   - "Medicamentos, produtos de higiene, vitaminas" → nichados
+   - "Lote com 2.333 itens de medicamentos e saúde" → nichados
+   - "Cadeira odontológica Kavo" → nichados
+   - "Armário odontológico 6 módulos" → nichados
+   
+B) COZINHA INDUSTRIAL:
+   ✅ Fogão INDUSTRIAL, geladeira INDUSTRIAL → "nichados"
+   ✅ Equipamento com "6 bocas", "inox profissional" → "nichados"
+   ❌ Fogão doméstico comum → "eletrodomesticos"
+   
+   Exemplos:
+   - "Fogão industrial 6 bocas inox" → nichados
+   - "Geladeira industrial câmara fria" → nichados
+   - "Fogão 4 bocas Brastemp" → eletrodomesticos
+
+C) OUTROS NICHADOS:
+   - Equipamento veterinário, estética, laboratório → "nichados"
+
+---
+
+🏗️ PRIORIDADE 2 - CONSTRUÇÃO vs INDUSTRIAL:
+
+A) MATERIAIS_CONSTRUCAO:
+   ✅ Máquinas para CORTAR/CONSTRUIR materiais → "materiais_construcao"
+   ✅ Ferramentas de construção civil → "materiais_construcao"
+   
+   Exemplos:
+   - "Cortadeira de piso de bancada" → materiais_construcao
+   - "Serra mármore" → materiais_construcao
+   - "Disco de corte" → materiais_construcao
+
+B) INDUSTRIAL_EQUIPAMENTOS:
+   ✅ Máquinas de PRODUÇÃO em série → "industrial_equipamentos"
+   ✅ Torno, fresadora, prensa, CNC → "industrial_equipamentos"
+   
+   Exemplos:
+   - "Torno mecânico industrial" → industrial_equipamentos
+   - "Prensa hidráulica" → industrial_equipamentos
+
+---
 
 💻 PRIORIDADE 3 - TECNOLOGIA vs ELETRODOMÉSTICOS:
-- TECNOLOGIA = informática, comunicação, entretenimento portátil
-  Ex: notebook, celular, tablet, impressora, servidor, console
-- ELETRODOMÉSTICOS = linha branca, conforto doméstico
-  Ex: geladeira doméstica, fogão doméstico, TV, microondas, air fryer
 
-🏗️ PRIORIDADE 4 - CONSTRUÇÃO:
-- Ferramenta/máquina para CONSTRUIR/CORTAR → "materiais_construcao"
-  Ex: cortadeira de piso, serra mármore, disco de corte
-- Material BRUTO → "materiais_construcao"
-  Ex: cimento, tijolo, tinta
+A) TECNOLOGIA:
+   ✅ Informática, comunicação, impressão → "tecnologia"
+   
+   Exemplos:
+   - "19 impressoras portáteis Tekpix" → tecnologia
+   - "Impressora digital com tecnologia ZINK" → tecnologia
+   - "Notebook, celular, tablet, servidor" → tecnologia
 
-🚗 PRIORIDADE 5 - VEÍCULOS:
-- QUALQUER coisa que TRANSPORTA pessoas/carga → "veiculos"
-  Ex: carro, moto, bicicleta, caminhão, patinete
+B) ELETRODOMESTICOS:
+   ✅ Linha branca doméstica, TV, microondas → "eletrodomesticos"
+   
+   Exemplos:
+   - "Geladeira Brastemp" → eletrodomesticos
+   - "TV LED 50 polegadas" → eletrodomesticos
+   - "Microondas Electrolux" → eletrodomesticos
 
-⚠️ DIVERSOS - apenas para:
-- Itens explicitamente descritos como "lote misto"
-- OU quando o item NÃO se encaixa em NENHUMA categoria acima
+---
 
-RESPONDA APENAS O NOME DA CATEGORIA (ex: "tecnologia", "moveis_decoracao", etc):"""
+🪑 PRIORIDADE 4 - MÓVEIS vs UTILIDADES:
+
+A) MOVEIS_DECORACAO:
+   ✅ Móvel = você SENTA, GUARDA coisas, DECORA
+   
+   Exemplos:
+   - "Sofá, mesa, cadeira, armário, estante" → moveis_decoracao
+   - "Móveis de escritório" → moveis_decoracao
+   - "Cadeira de escritório giratória" → moveis_decoracao
+
+B) CASA_UTILIDADES:
+   ✅ Utensílio = você USA para cozinhar/comer/limpar
+   
+   Exemplos:
+   - "Panela, prato, copo, talher" → casa_utilidades
+   - "Kit churrasco" → casa_utilidades
+
+---
+
+🎨 DIVERSOS - APENAS QUANDO:
+
+1. Lote EXPLICITAMENTE misto com múltiplas categorias diferentes
+2. Item que NÃO se encaixa em NENHUMA categoria acima
+3. Lote com palavras "itens diversos", "produtos variados", "lote misto"
+
+Exemplos:
+- "TVs, geladeiras, micro-ondas, bebedouro e telefone" → diversos (múltiplas categorias)
+- "Lote variado de produtos" → diversos
+
+====================================
+
+RESPONDA APENAS O NOME DA CATEGORIA (ex: "tecnologia", "nichados", "diversos"):"""
         
         return prompt
     
     def _call_groq(self, prompt: str) -> Optional[str]:
-        """Chama API Groq"""
+        """Chama API Groq com configuração otimizada"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -225,16 +296,16 @@ RESPONDA APENAS O NOME DA CATEGORIA (ex: "tecnologia", "moveis_decoracao", etc):
             "messages": [
                 {
                     "role": "system",
-                    "content": "Você é um classificador expert em leilões. Use bom senso e contexto, não apenas palavras-chave. Responda APENAS o nome da categoria."
+                    "content": "Você é um classificador EXPERT em leilões com 20 anos de experiência. Analise o CONTEXTO completo e a FUNÇÃO REAL do item. Use bom senso profissional, não apenas palavras-chave. Responda APENAS o nome da categoria."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            "temperature": 0.1,  # Menos aleatório
+            "temperature": 0.05,  # MUITO determinístico
             "max_tokens": 50,
-            "top_p": 0.9
+            "top_p": 0.85
         }
         
         try:
@@ -261,12 +332,12 @@ RESPONDA APENAS O NOME DA CATEGORIA (ex: "tecnologia", "moveis_decoracao", etc):
         print("📊 ESTATÍSTICAS DE CLASSIFICAÇÃO")
         print("="*80)
         print(f"Total: {self.stats['total']}")
-        print(f"Groq (IA): {self.stats['groq_classifications']} ({self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Financeiros bloqueados: {self.stats['financial_blocked']} ({self.stats['financial_blocked']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Mistos detectados: {self.stats['mixed_detected']} ({self.stats['mixed_detected']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"🤖 Groq (IA): {self.stats['groq_classifications']} ({self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"💼 Financeiros bloqueados: {self.stats['financial_blocked']} ({self.stats['financial_blocked']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"🎨 Mistos detectados: {self.stats['mixed_detected']} ({self.stats['mixed_detected']/max(self.stats['total'],1)*100:.1f}%)")
         
         if self.stats['by_table']:
-            print(f"\n📦 DISTRIBUIÇÃO:")
+            print(f"\n📦 DISTRIBUIÇÃO POR TABELA:")
             print("-" * 80)
             
             for table, count in sorted(self.stats['by_table'].items(), key=lambda x: x[1], reverse=True):
@@ -276,6 +347,8 @@ RESPONDA APENAS O NOME DA CATEGORIA (ex: "tecnologia", "moveis_decoracao", etc):
                 print(f"{emoji} {table:.<35} {count:>6} ({pct:>5.1f}%) {bar}")
         
         print("="*80)
+        print(f"\n💡 Groq está fazendo {self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}% do trabalho")
+        print(f"   (quanto mais próximo de 100%, melhor!)")
 
 
 def classify_item_to_table(item: Dict) -> str:
@@ -285,41 +358,121 @@ def classify_item_to_table(item: Dict) -> str:
 
 
 if __name__ == "__main__":
-    print("\n🤖 TESTE - CLASSIFICADOR INTELIGENTE (mais Groq, menos regex)\n")
+    print("\n🤖 TESTE - CLASSIFICADOR ULTRA-INTELIGENTE\n")
     print("="*80)
+    print("Groq como CÉREBRO - mínimo de regex")
+    print("="*80 + "\n")
     
     classifier = GroqTableClassifier()
     
     test_items = [
-        # DIVERSOS - FINANCEIROS (bloqueio pré-Groq)
-        {"normalized_title": "cotas-sociais-de-empresas-edilson-vila-e-edith-figueiredo", "description": "Cotas Sociais de Empresas"},
-        {"normalized_title": "5948-acoes-preferenciais-classe-b-elet6-da-eletrobras", "description": "Ações Preferenciais Eletrobrás"},
+        # ========================================
+        # DIVERSOS - CASOS QUE VOCÊ REPORTOU:
+        # ========================================
         
-        # DIVERSOS - LOTE MISTO (detecção pré-Groq)
-        {"normalized_title": "tvs-geladeiras-micro-ondas-bebedouro-e-telefone", "description": "TVs, Geladeiras, Micro-ondas"},
+        # 1. FINANCEIROS/ABSTRATOS → diversos
+        {
+            "normalized_title": "creditos-de-emprestimo-compulsorio-sobre-consumo-de-energia-eletrica",
+            "description": "Créditos de Empréstimo Compulsório sobre Consumo de Energia Elétrica"
+        },
+        {
+            "normalized_title": "registros-de-marca-lock-e-athol",
+            "description": "Registros de Marca - LOCK e ATHOL"
+        },
+        {
+            "normalized_title": "expectativa-de-direitos-creditorios-contra-a-vale-sa",
+            "description": "Expectativa de Direitos Creditórios contra a VALE S.A."
+        },
+        {
+            "normalized_title": "marca-regenfill-devidamente-registrada-no-inpi-servicos",
+            "description": "Marca REGENFILL devidamente registrada no INPI"
+        },
+        {
+            "normalized_title": "5948-acoes-preferenciais-classe-b-elet6-da-eletrobras",
+            "description": "5.948 Ações Preferenciais Classe B (ELET6) da Eletrobrás"
+        },
+        {
+            "normalized_title": "titulo-patrimonial-do-club-athletico-paulistano",
+            "description": "Título Patrimonial do Club Athletico Paulistano"
+        },
+        {
+            "normalized_title": "cotas-sociais-de-empresas-edilson-vila-e-edith-figueiredo",
+            "description": "Cotas Sociais de Empresas"
+        },
         
-        # GROQ DEVE CLASSIFICAR (casos que precisam inteligência):
-        {"normalized_title": "19-impressoras-digitais-portateis-tekpix", "description": "Impressoras portáteis com tecnologia ZINK"},
-        {"normalized_title": "maquina-cortadeira-de-piso-de-bancada-cortag", "description": "Cortadeira de piso bancada"},
-        {"normalized_title": "cadeira-odontologica-completa-marca-kavo", "description": "Cadeira odontológica Kavo"},
-        {"normalized_title": "armario-odontologico-de-06-modulos", "description": "Armário consultório odonto"},
-        {"normalized_title": "fogao-industrial-6-bocas-inox", "description": "Fogão industrial 6 bocas"},
-        {"normalized_title": "sofa-em-estrutura-macica-tecido-veludo", "description": "Sofá veludo"},
-        {"normalized_title": "moveis-de-escritorio-mesa-cadeira", "description": "Móveis escritório"},
-        {"normalized_title": "servidores-dell-t300-e-powervault", "description": "Servidores Dell"},
-        {"normalized_title": "aparelho-celular-moto-g-22", "description": "Celular Moto G"},
+        # 2. LOTE MISTO → diversos
+        {
+            "normalized_title": "tvs-geladeiras-micro-ondas-bebedouro-e-telefone",
+            "description": "TVs, Geladeiras, Micro-ondas, Bebedouro e Telefone"
+        },
+        
+        # ========================================
+        # CASOS ESPECÍFICOS (não são diversos):
+        # ========================================
+        
+        # MEDICAMENTOS → nichados
+        {
+            "normalized_title": "medicamentos-produtos-de-higiene-vitaminas-e-demais-itens-correlatos",
+            "description": "Medicamentos, produtos de higiene, vitaminas e demais itens correlatos"
+        },
+        {
+            "normalized_title": "lote-com-2333-itens-de-medicamentos-saude-higiene-cosmeticos-e-perfumaria",
+            "description": "Lote com 2.333 Itens de Medicamentos, Saúde, Higiene"
+        },
+        
+        # COMPACTADOR → industrial_equipamentos (NÃO casa_utilidades!)
+        {
+            "normalized_title": "01-compactador-de-lixo-e-coletor-rodotec-capacidade-15m",
+            "description": "01 Compactador de lixo e coletor Rodotec, capacidade 15m"
+        },
+        
+        # CONSTRUÇÃO → materiais_construcao
+        {
+            "normalized_title": "maquina-cortadeira-de-piso-de-bancada-cortag",
+            "description": "Máquina Cortadeira de Piso de Bancada, CORTAG"
+        },
+        
+        # TECNOLOGIA → tecnologia (NÃO materiais_construcao!)
+        {
+            "normalized_title": "19-impressoras-digitais-portateis-tekpix-com-tecnologia-zink",
+            "description": "19 Impressoras Digitais Portáteis Tekpix com Tecnologia ZINK"
+        },
+        
+        # MÓVEIS → moveis_decoracao
+        {
+            "normalized_title": "sofa-em-estrutura-macica-tecido-veludo",
+            "description": "Sofá em estrutura maciça tecido de veludo"
+        },
+        
+        # ODONTO → nichados
+        {
+            "normalized_title": "cadeira-odontologica-completa-marca-kavo",
+            "description": "Cadeira odontológica Kavo completa"
+        },
     ]
     
-    print("🔍 CLASSIFICANDO COM GROQ...\n")
+    print("🔍 CLASSIFICANDO OS CASOS PROBLEMÁTICOS...\n")
     
-    for item in test_items:
+    print("=" * 80)
+    print("ESPERADO: DIVERSOS (financeiros/abstratos + lote misto)")
+    print("=" * 80)
+    
+    for i in range(8):  # Primeiros 8 são diversos
+        item = test_items[i]
         table = classifier.classify(item)
-        print(f"'{item['normalized_title'][:60]}'")
-        print(f"  → {table}\n")
+        status = "✅" if table == "diversos" else "❌"
+        print(f"{status} {i+1}. '{item['normalized_title'][:55]}'")
+        print(f"     → {table}\n")
+    
+    print("=" * 80)
+    print("ESPERADO: CATEGORIAS ESPECÍFICAS (não diversos)")
+    print("=" * 80)
+    
+    for i in range(8, len(test_items)):  # Resto são categorias específicas
+        item = test_items[i]
+        table = classifier.classify(item)
+        status = "✅" if table != "diversos" else "❌"
+        print(f"{status} {i+1}. '{item['normalized_title'][:55]}'")
+        print(f"     → {table}\n")
     
     classifier.print_stats()
-    
-    print("\n💡 ANÁLISE:")
-    groq_pct = classifier.stats['groq_classifications'] / max(classifier.stats['total'], 1) * 100
-    print(f"Groq está fazendo {groq_pct:.1f}% do trabalho (quanto mais, melhor!)")
-    print(f"Bloqueios pré-Groq: {classifier.stats['financial_blocked'] + classifier.stats['mixed_detected']} (apenas casos óbvios)")
