@@ -32,7 +32,8 @@ class GroqTableClassifier:
                         'smartwatch', 'fone', 'headphone', 'caixa de som', 'roteador', 'switch',
                         'mouse', 'teclado', 'webcam', 'microfone', 'ssd', 'hd externo', 'pendrive',
                         'iphone', 'ipad', 'macbook', 'samsung galaxy', 'dell', 'lenovo', 'asus', 'acer',
-                        'gopro', 'dji', 'canon', 'nikon', 'sony alpha']
+                        'gopro', 'dji', 'canon', 'nikon', 'sony alpha', 'servidor', 'powervault',
+                        'celular', 'moto g', 'galaxy', 'xiaomi', 'motorola']
         },
         'eletrodomesticos': {
             'desc': 'Eletrodomésticos e linha branca',
@@ -83,7 +84,10 @@ class GroqTableClassifier:
                         'aparador', 'buffet', 'cristaleira', 'escrivaninha', 'banco',
                         'pufe', 'puff', 'banqueta', 'lustres', 'luminaria', 'abajur',
                         'quadro', 'espelho', 'tapete', 'cortina', 'persiana', 'almofada',
-                        'carpete', 'decoracao', 'moldura']
+                        'carpete', 'decoracao', 'moldura', 'movel', 'moveis',
+                        'cadeira escritorio', 'mesa escritorio', 'bancada escritorio',
+                        'estante escritorio', 'arquivo', 'gaveteiro', 'mesa reuniao',
+                        'cadeira giratoria', 'mesa diretoria', 'longarina']
         },
         'casa_utilidades': {
             'desc': 'Utilidades domésticas',
@@ -118,7 +122,8 @@ class GroqTableClassifier:
                         'ferragem', 'dobradiça', 'fechadura', 'tinta', 'verniz',
                         'tubo', 'cano', 'conexao', 'torneira', 'registro', 'valvula',
                         'madeira', 'tabua', 'viga', 'areia', 'brita', 'pedra',
-                        'vergalhao', 'ferro', 'aco', 'colunas', 'vigas']
+                        'vergalhao', 'ferro', 'aco', 'colunas', 'vigas',
+                        'cortadeira de piso', 'serra marmore', 'disco de corte']
         },
         'industrial_equipamentos': {
             'desc': 'Equipamentos industriais',
@@ -141,16 +146,36 @@ class GroqTableClassifier:
         # ========== ESPECIALIDADES ==========
         'nichados': {
             'desc': 'Equipamentos especializados (médico, odonto, veterinário, estética, cozinha profissional)',
-            'keywords': ['odontologico', 'cadeira odontologica', 'raio-x dental', 'autoclave',
-                        'medico', 'hospitalar', 'clinica', 'maca', 'mesa cirurgica',
-                        'bisturi', 'estetoscopio', 'equipamento medico', 'desfibrilador',
-                        'veterinario', 'maquina veterinaria', 'gaiola veterinaria',
-                        'estetica', 'depilacao laser', 'criolipilise', 'radiofrequencia',
-                        'cozinha profissional', 'fogao industrial', 'forno industrial',
-                        'coifa industrial', 'chapa industrial', 'fritadeira industrial',
-                        'balcao refrigerado', 'camara fria', 'freezer industrial',
-                        'laboratorio', 'centrifuga', 'microscópio', 'balanca analitica',
-                        'estufa laboratorio', 'capela de exaustao']
+            'keywords': [
+                # ODONTOLÓGICO (REFORÇADO!)
+                'odontologico', 'odontologica', 'cadeira odontologica', 'raio-x dental',
+                'raio x odontologico', 'autoclave', 'dentista', 'consultorio odontologico',
+                'armario odontologico', 'bancada odontologica', 'mocho odontologico',
+                'equipo odontologico', 'compressor odontologico', 'amalgamador',
+                'fotopolimerizador', 'ultrassom odontologico', 'kavo', 'gnatus', 'dabi atlante',
+                'odontologia', 'clinica odontologica', 'unidade odontologica',
+                'material odontologico', 'instrumental odontologico',
+                # MÉDICO/HOSPITALAR
+                'medico', 'hospitalar', 'clinica', 'maca', 'mesa cirurgica',
+                'bisturi', 'estetoscopio', 'equipamento medico', 'desfibrilador',
+                'monitor de sinais', 'oximetro', 'esfigmomanometro',
+                # VETERINÁRIO
+                'veterinario', 'maquina veterinaria', 'gaiola veterinaria',
+                'mesa veterinaria', 'clinica veterinaria',
+                # ESTÉTICA
+                'estetica', 'depilacao laser', 'criolipilise', 'radiofrequencia',
+                'ultracavitacao', 'microagulhamento', 'salon', 'spa',
+                # COZINHA PROFISSIONAL/INDUSTRIAL
+                'cozinha profissional', 'cozinha industrial', 'fogao industrial',
+                'forno industrial', 'coifa industrial', 'chapa industrial',
+                'fritadeira industrial', 'balcao refrigerado', 'camara fria',
+                'freezer industrial', 'geladeira industrial', 'refrigerador industrial',
+                'mesa inox', 'pia inox', 'bancada inox', 'fogao 6 bocas',
+                'forno combinado', 'pass through', 'equipamento gastronomico',
+                # LABORATÓRIO
+                'laboratorio', 'centrifuga', 'microscopio', 'balanca analitica',
+                'estufa laboratorio', 'capela de exaustao', 'autoclave laboratorio'
+            ]
         },
         'partes_pecas': {
             'desc': 'Peças e componentes avulsos',
@@ -205,19 +230,9 @@ class GroqTableClassifier:
     def _is_truly_mixed_lot(self, item: Dict) -> bool:
         """
         Verifica se é REALMENTE um lote misto (2+ categorias DIFERENTES).
-        Deve ser MUITO restritivo - apenas casos óbvios.
-        
-        Exemplos que SÃO diversos:
-        - "Lote: Cafeteira + Notebook + Mesa"
-        - "Kit com itens diversos: eletrodoméstico, móvel, eletrônico"
-        - "Mercadorias variadas - tecnologia e móveis"
-        
-        Exemplos que NÃO são diversos:
-        - "Notebook Dell com mouse e teclado" (tudo tecnologia)
-        - "Conjunto de panelas" (tudo casa_utilidades)
-        - "Kit 3 cadeiras + mesa" (tudo móveis)
+        MUITO restritivo - apenas casos óbvios de mix.
         """
-        title = item.get('title', '').lower()
+        title = item.get('normalized_title', '').lower()
         desc = item.get('description', '').lower()
         text = f"{title} {desc}"
         
@@ -229,8 +244,7 @@ class GroqTableClassifier:
             r'\bdiversos\s+itens?\b',
             r'\bmercadorias?\s+variadas?\b',
             r'\bprodutos?\s+variados?\b',
-            r'\bmix\s+de\s+produtos?\b',
-            r'\blote\s+com\s+diversos\b'
+            r'\bmix\s+de\s+produtos?\b'
         ]
         
         has_explicit = any(re.search(p, text, re.IGNORECASE) for p in explicit_patterns)
@@ -238,35 +252,35 @@ class GroqTableClassifier:
         if not has_explicit:
             return False
         
-        # 2️⃣ Se tem texto "diversos", verifica se REALMENTE menciona categorias diferentes
+        # 2️⃣ Verifica se REALMENTE menciona categorias diferentes
         categories_found = set()
         
         category_indicators = {
-            'tecnologia': ['notebook', 'tablet', 'smartphone', 'impressora', 'monitor', 'computador'],
-            'eletrodomesticos': ['geladeira', 'fogao', 'microondas', 'tv', 'televisao', 'lavadora'],
-            'moveis': ['sofa', 'mesa', 'cadeira', 'armario', 'cama', 'estante'],
-            'casa_utilidades': ['panela', 'prato', 'copo', 'talher', 'louça'],
+            'tecnologia': ['notebook', 'tablet', 'smartphone', 'impressora', 'monitor'],
+            'eletrodomesticos': ['geladeira', 'fogao', 'microondas', 'tv', 'lavadora'],
+            'moveis': ['sofa', 'mesa', 'cadeira', 'armario', 'cama'],
+            'casa_utilidades': ['panela', 'prato', 'copo', 'talher'],
             'veiculos': ['carro', 'moto', 'caminhao', 'bicicleta'],
-            'imoveis': ['casa', 'apartamento', 'terreno', 'imovel']
+            'imoveis': ['casa', 'apartamento', 'terreno']
         }
         
         for category, indicators in category_indicators.items():
             if any(indicator in text for indicator in indicators):
                 categories_found.add(category)
         
-        # Se menciona 2+ categorias diferentes, é diversos
         return len(categories_found) >= 2
     
     def _pre_classify_obvious(self, item: Dict) -> Optional[str]:
         """
         Pré-classifica itens óbvios SEM usar Groq.
-        Economiza chamadas de API e melhora velocidade.
+        Usa normalized_title que agora vem limpo do external_id.
         """
-        title = item.get('title', '').lower()
+        # Usa normalized_title (limpo) ao invés de title (sujo)
+        title = item.get('normalized_title', '').lower()
         desc = item.get('description', '').lower()
         text = f"{title} {desc}"
         
-        # Remove metadata que pode confundir (ex: "categoria: veiculos")
+        # Remove ruídos
         text = re.sub(r'categoria\s*:\s*\w+', '', text)
         text = re.sub(r'secao\s*:\s*\w+', '', text)
         
@@ -274,7 +288,7 @@ class GroqTableClassifier:
         matches_by_table = {}
         
         for table, info in self.TABLES_INFO.items():
-            if table == 'diversos':  # Pula diversos na pré-classificação
+            if table == 'diversos':
                 continue
             
             keywords = info.get('keywords', [])
@@ -283,30 +297,15 @@ class GroqTableClassifier:
             if matches > 0:
                 matches_by_table[table] = matches
         
-        # Se nenhum match, retorna None (vai pro Groq)
         if not matches_by_table:
             return None
         
         # Retorna tabela com mais matches
         best_table = max(matches_by_table.items(), key=lambda x: x[1])
         
-        # Só retorna se tiver pelo menos 2 matches (mais confiante)
-        if best_table[1] >= 2:
+        # Aceita se tiver 1+ match (threshold mais baixo, já que título está limpo)
+        if best_table[1] >= 1:
             return best_table[0]
-        
-        # Se só 1 match mas muito óbvio (ex: marca de carro), aceita
-        obvious_single_match_tables = ['veiculos', 'imoveis']
-        if best_table[1] == 1 and best_table[0] in obvious_single_match_tables:
-            # Verifica se é match forte
-            table_keywords = self.TABLES_INFO[best_table[0]]['keywords']
-            strong_keywords = {
-                'veiculos': ['fiat', 'ford', 'honda', 'toyota', 'yamaha', 'civic', 'corolla'],
-                'imoveis': ['apartamento', 'terreno', 'casa', 'lote', 'imovel']
-            }
-            
-            if best_table[0] in strong_keywords:
-                if any(kw in text for kw in strong_keywords[best_table[0]]):
-                    return best_table[0]
         
         return None
     
@@ -320,7 +319,7 @@ class GroqTableClassifier:
         3. Usa Groq AI → tabela específica
         4. Fallback → diversos
         """
-        title = item.get('title', '').strip()
+        title = item.get('normalized_title', '').strip()
         description = item.get('description', '')[:500]
         
         if not title:
@@ -334,9 +333,8 @@ class GroqTableClassifier:
             self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
             self.stats['total'] += 1
             
-            # Debug primeiros
-            if self.stats['diversos'] <= 5:
-                print(f"  🎨 DIVERSOS (misto real): '{title[:70]}'")
+            if self.stats['diversos'] <= 3:
+                print(f"  🎨 DIVERSOS (misto): '{title[:60]}'")
             
             return 'diversos'
         
@@ -348,10 +346,9 @@ class GroqTableClassifier:
             self.stats['by_table'][pre_classified] = self.stats['by_table'].get(pre_classified, 0) + 1
             self.stats['total'] += 1
             
-            # Debug primeiros de cada categoria
             table_count = self.stats['by_table'][pre_classified]
             if table_count <= 3:
-                print(f"  ⚡ PRÉ-CLASS {pre_classified}: '{title[:60]}'")
+                print(f"  ⚡ {pre_classified}: '{title[:55]}'")
             
             return pre_classified
         
@@ -363,13 +360,12 @@ class GroqTableClassifier:
             self.stats['by_table'][table_name] = self.stats['by_table'].get(table_name, 0) + 1
             self.stats['total'] += 1
             
-            # Debug primeiros
-            if self.stats['groq_classifications'] <= 10:
-                print(f"  🤖 GROQ {table_name}: '{title[:60]}'")
+            if self.stats['groq_classifications'] <= 5:
+                print(f"  🤖 {table_name}: '{title[:55]}'")
             
             return table_name
         
-        # 4️⃣ FALLBACK: DIVERSOS (último recurso)
+        # 4️⃣ FALLBACK
         self.stats['diversos'] += 1
         self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
         self.stats['total'] += 1
@@ -377,7 +373,7 @@ class GroqTableClassifier:
         return 'diversos'
     
     def _classify_with_groq(self, title: str, description: str) -> Optional[str]:
-        """Classifica com Groq e retorna a tabela"""
+        """Classifica com Groq"""
         prompt = self._build_prompt(title, description)
         
         try:
@@ -386,13 +382,11 @@ class GroqTableClassifier:
             if response:
                 response_clean = response.strip().lower()
                 
-                # Remove explicações extras
                 if '\n' in response_clean:
                     response_clean = response_clean.split('\n')[0]
                 
                 response_clean = response_clean.replace(',', '').replace(';', '').strip()
                 
-                # Valida se é tabela válida
                 if response_clean in self.TABLES_INFO:
                     return response_clean
             
@@ -403,15 +397,14 @@ class GroqTableClassifier:
             return None
     
     def _build_prompt(self, title: str, description: str) -> str:
-        """Monta prompt direto para Groq"""
+        """Prompt direto para Groq"""
         
-        # Lista simples de tabelas
         tables_list = "\n".join([
             f"- {table}: {info['desc']}"
             for table, info in self.TABLES_INFO.items()
         ])
         
-        prompt = f"""Você é um classificador de leilões brasileiro. Identifique a categoria MAIS ESPECÍFICA.
+        prompt = f"""Você é um classificador de leilões. Identifique a categoria MAIS ESPECÍFICA.
 
 CATEGORIAS:
 {tables_list}
@@ -420,26 +413,30 @@ ITEM:
 Título: {title}
 Descrição: {description[:300] if description else 'N/A'}
 
-REGRAS CRÍTICAS:
+REGRAS:
 
-🏠 IMÓVEIS (máxima prioridade):
-- Casa, apartamento, terreno, lote, galpão → "imoveis"
-- Se mencionar m², quartos, suítes → "imoveis"
+🏥 NICHADOS (PRIORIDADE MÁXIMA):
+- Cadeira odontológica, raio-x dental, autoclave → "nichados"
+- Armário odontológico, bancada consultório → "nichados"
+- Fogão industrial, geladeira industrial → "nichados"
+- Qualquer equipamento de: odonto, médico, veterinário, cozinha industrial → "nichados"
+
+🪑 MÓVEIS:
+- Sofá, mesa, cadeira, armário, rack → "moveis_decoracao"
+- Móveis de escritório (mesa, cadeira, arquivo) → "moveis_decoracao"
+
+🏠 IMÓVEIS:
+- Casa, apartamento, terreno → "imoveis"
 
 🚗 VEÍCULOS:
-- Carro, moto, caminhão, ônibus, bicicleta → "veiculos"
-- Se mencionar marca (Fiat, Honda, etc) → "veiculos"
+- Carro, moto, bicicleta → "veiculos"
 
-💻 TECNOLOGIA vs 📺 ELETRODOMÉSTICOS:
-- Notebook, smartphone, impressora → "tecnologia"
-- Smart TV, geladeira, fogão, air fryer → "eletrodomesticos"
-
-🔧 NICHADOS:
-- Odontológico, hospitalar, cozinha industrial → "nichados"
+💻 TECNOLOGIA vs 📺 ELETRO:
+- Notebook, celular, servidor → "tecnologia"
+- TV, geladeira doméstica, air fryer → "eletrodomesticos"
 
 ⚠️ DIVERSOS:
 - APENAS se explicitamente "lote misto" com categorias diferentes
-- Se tem categoria clara, NÃO use diversos
 
 RESPOSTA (apenas o nome da categoria):"""
         
@@ -457,7 +454,7 @@ RESPOSTA (apenas o nome da categoria):"""
             "messages": [
                 {
                     "role": "system",
-                    "content": "Você é um classificador preciso. Responda APENAS com o nome da categoria. Uma palavra."
+                    "content": "Você é um classificador preciso. Responda APENAS o nome da categoria."
                 },
                 {
                     "role": "user",
@@ -488,86 +485,64 @@ RESPOSTA (apenas o nome da categoria):"""
         return self.stats.copy()
     
     def print_stats(self):
-        """Imprime estatísticas detalhadas"""
+        """Imprime estatísticas"""
         print("\n" + "="*80)
-        print("📊 ESTATÍSTICAS DE CLASSIFICAÇÃO GROQ")
+        print("📊 ESTATÍSTICAS DE CLASSIFICAÇÃO")
         print("="*80)
-        print(f"Total processado: {self.stats['total']}")
-        print(f"Pré-classificações (keywords): {self.stats['pre_classifications']} ({self.stats['pre_classifications']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Classificações Groq: {self.stats['groq_classifications']} ({self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Diversos (lotes mistos): {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Falhas: {self.stats['failed']}")
+        print(f"Total: {self.stats['total']}")
+        print(f"Pré-classificações: {self.stats['pre_classifications']} ({self.stats['pre_classifications']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Groq: {self.stats['groq_classifications']} ({self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Diversos: {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
         
         if self.stats['by_table']:
-            print(f"\n📦 DISTRIBUIÇÃO POR TABELA:")
+            print(f"\n📦 DISTRIBUIÇÃO:")
             print("-" * 80)
             
             for table, count in sorted(self.stats['by_table'].items(), key=lambda x: x[1], reverse=True):
                 pct = count / self.stats['total'] * 100
-                bar_length = int(pct / 2)
-                bar = "█" * bar_length
-                
+                bar = "█" * int(pct / 2)
                 emoji = "🎨" if table == 'diversos' else "  "
                 print(f"{emoji} {table:.<35} {count:>6} ({pct:>5.1f}%) {bar}")
         
         print("="*80)
 
 
-# Função auxiliar
 def classify_item_to_table(item: Dict) -> str:
-    """Classifica um item e retorna a tabela"""
+    """Classifica um item"""
     classifier = GroqTableClassifier()
     return classifier.classify(item) or 'diversos'
 
 
 if __name__ == "__main__":
-    print("\n🤖 TESTANDO CLASSIFICADOR - VERSÃO SEM PILARES\n")
+    print("\n🤖 TESTE - CLASSIFICADOR\n")
     print("="*80)
     
     classifier = GroqTableClassifier()
     
     test_items = [
-        # IMÓVEIS (devem ir para imoveis, não diversos!)
-        {"title": "Apartamento 2 Quartos - 65m²", "description": "Apto com 2 quartos, sala, cozinha"},
-        {"title": "Casa 3 Dormitórios Centro", "description": "Casa de 120m² com garagem"},
-        {"title": "Terreno 250m² Residencial", "description": "Lote em condomínio fechado"},
-        
-        # VEÍCULOS
-        {"title": "Fiat Uno 2015 Completo", "description": "Carro 4 portas"},
-        {"title": "Honda CG 160 2020", "description": "Moto em bom estado"},
-        {"title": "Bicicleta Caloi Aro 29", "description": "Mountain bike 21 marchas"},
-        
-        # TECNOLOGIA
-        {"title": "Notebook Dell Inspiron i5 8GB", "description": "Notebook completo"},
-        {"title": "iPhone 13 Pro 256GB", "description": "Smartphone Apple"},
-        {"title": "Impressora HP LaserJet", "description": "Multifuncional"},
-        
-        # ELETRODOMÉSTICOS
-        {"title": "Smart TV Samsung 55\" 4K", "description": "Televisão inteligente"},
-        {"title": "Geladeira Brastemp Inverse", "description": "Frost free 400L"},
-        {"title": "Air Fryer Philips Walita", "description": "Fritadeira 4L"},
+        # NICHADOS (odonto)
+        {"normalized_title": "cadeira-odontologica-completa-marca-kavo-modelo-unique-j119235", "description": "Cadeira odonto Kavo completa"},
+        {"normalized_title": "armario-odontologico-de-06-modulos-j119239", "description": "Armário para consultório odonto"},
+        {"normalized_title": "bancada-e-armario-para-consultorio-com-04-modulos-j119240", "description": "Bancada consultório"},
         
         # MÓVEIS
-        {"title": "Sofá 3 Lugares Retrátil", "description": "Sofá tecido cinza"},
-        {"title": "Mesa Jantar 6 Cadeiras", "description": "Conjunto completo"},
+        {"normalized_title": "sofa-em-estrutura-macica-tecido-de-veludo-fabricacao-propria-j119233", "description": "Sofá veludo"},
+        {"normalized_title": "sofa-magnum-3-20-m-reclinavel-e-eletrico-couro-100-legitimo-j118338", "description": "Sofá Magnum"},
+        {"normalized_title": "moveis-de-escritorio-j119294", "description": "Móveis escritório"},
         
-        # DIVERSOS (VERDADEIROS - lotes mistos)
-        {"title": "Lote Misto: Geladeira + Notebook + Mesa", "description": "Produtos variados"},
-        {"title": "Kit Diversos: TV + Bicicleta + Panelas", "description": "Lote com categorias diferentes"},
+        # MATERIAIS CONSTRUÇÃO
+        {"normalized_title": "maquina-cortadeira-de-piso-de-bancada-cortag-j119763", "description": "Cortadeira de piso"},
         
-        # NÃO DEVEM ser diversos (mesmo tendo múltiplos itens da MESMA categoria)
-        {"title": "Kit 3 Cadeiras + Mesa Jantar", "description": "Conjunto de móveis"},
-        {"title": "Lote 10 Notebooks Dell e HP", "description": "Notebooks diversos modelos"},
+        # TECNOLOGIA
+        {"normalized_title": "servidores-dell-t300-e-powervault-md1000-j119127", "description": "Servidores Dell"},
+        {"normalized_title": "aparelho-celular-moto-g-22-j119566", "description": "Celular Moto G"},
     ]
     
-    print("🔍 CLASSIFICANDO ITENS DE TESTE...\n")
+    print("🔍 CLASSIFICANDO...\n")
     
-    for i, item in enumerate(test_items, 1):
+    for item in test_items:
         table = classifier.classify(item)
-        print(f"{i:02d}. '{item['title'][:65]}'")
-        print(f"    └─ 📂 Tabela: {table}")
-        print()
+        print(f"'{item['normalized_title'][:60]}'")
+        print(f"  → {table}\n")
     
     classifier.print_stats()
-    print("\n✅ Teste concluído!")
-    print("="*80)
