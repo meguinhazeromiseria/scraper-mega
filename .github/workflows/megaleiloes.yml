@@ -1,0 +1,102 @@
+name: 🟢 MegaLeilões - Domínio Completo
+
+on:
+  # Execução manual
+  workflow_dispatch:
+  
+  # Cron automático - UMA VEZ POR SEMANA
+  schedule:
+    # Toda quarta-feira às 6h UTC (3h da manhã no Brasil)
+    - cron: '0 6 * * 3'
+
+jobs:
+  megaleiloes-scraper:
+    name: 🟢 MegaLeilões - Scrape Completo
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install Dependencies
+        run: |
+          pip install requests playwright beautifulsoup4 python-dotenv supabase groq
+          playwright install chromium
+          playwright install-deps
+      
+      - name: Run MegaLeilões Scraper (Domínio Completo)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          echo "========================================"
+          echo "🟢 MEGALEILÕES - DOMÍNIO COMPLETO"
+          echo "========================================"
+          echo "📅 Início: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "🇧🇷 Horário Brasil: $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M:%S BRT')"
+          echo "========================================"
+          echo ""
+          echo "🔥 Varrendo TODAS as categorias do MegaLeilões:"
+          echo "   • Veículos (6 subcategorias)"
+          echo "   • Imóveis"
+          echo "   • Bens de Consumo"
+          echo "   • Industrial"
+          echo "   • Animais"
+          echo "   • Outros"
+          echo ""
+          echo "========================================"
+          
+          cd scrapers/megaleiloes
+          python scraper.py
+          
+          echo ""
+          echo "✅ MegaLeilões concluído: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
+      - name: Upload Data (Debug)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: megaleiloes-${{ github.run_number }}
+          path: scrapers/megaleiloes/data/normalized/megaleiloes_*.json
+          retention-days: 3
+      
+      - name: Generate Summary
+        if: always()
+        run: |
+          echo "## 🟢 MegaLeilões - Domínio Completo" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "**Modo:** Manual" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Modo:** Cron (automático semanal)" >> $GITHUB_STEP_SUMMARY
+            echo "**Frequência:** Toda quarta-feira às 6h UTC (3h BRT)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Horário UTC:** $(date -u '+%Y-%m-%d %H:%M')" >> $GITHUB_STEP_SUMMARY
+          echo "**Horário Brasil:** $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M')" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Categorias Processadas:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Veículos:" >> $GITHUB_STEP_SUMMARY
+          echo "  - Aeronaves" >> $GITHUB_STEP_SUMMARY
+          echo "  - Barcos" >> $GITHUB_STEP_SUMMARY
+          echo "  - Caminhões" >> $GITHUB_STEP_SUMMARY
+          echo "  - Carros" >> $GITHUB_STEP_SUMMARY
+          echo "  - Motos" >> $GITHUB_STEP_SUMMARY
+          echo "  - Ônibus" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Imóveis" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Bens de Consumo" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Industrial" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Animais" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Outros" >> $GITHUB_STEP_SUMMARY

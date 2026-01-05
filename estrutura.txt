@@ -1,0 +1,20 @@
+grupo1/
+├── .github/
+│   └── workflows/
+│       ├── superbid.yml          # Um workflow por domínio
+│       ├── sodre.yml
+│       └── megaleiloes.yml
+│
+└── scrapers/
+    ├── supabase_client.py        # Fica igual
+    ├── groq_classifier.py        # Fica igual
+    ├── normalizer.py             # UM ÚNICO normalizer genérico
+    │
+    ├── superbid/
+    │   └── scraper.py            # Scraper COMPLETO do Superbid
+    │
+    ├── sodre/
+    │   └── scraper.py            # Scraper COMPLETO do Sodré
+    │
+    └── megaleiloes/
+        └── scraper.py            # Scraper COMPLETO do MegaLeilões
