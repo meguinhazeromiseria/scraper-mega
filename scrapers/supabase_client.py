@@ -201,11 +201,22 @@ class SupabaseClient:
         }
         
         # ✅ Campos específicos por tabela
-        if tabela == 'veiculos' and 'vehicle_type' in item:
-            data['vehicle_type'] = str(item['vehicle_type'])[:255] if item['vehicle_type'] else None
+        if tabela == 'veiculos':
+            # Tenta pegar do root primeiro, depois do metadata
+            vehicle_type = item.get('vehicle_type')
+            if not vehicle_type and isinstance(metadata, dict):
+                vehicle_type = metadata.get('vehicle_type')
+            
+            if vehicle_type:
+                data['vehicle_type'] = str(vehicle_type)[:255]
         
-        if tabela == 'tecnologia' and 'multiplecategory' in item:
-            data['multiplecategory'] = item['multiplecategory'] if isinstance(item['multiplecategory'], list) else None
+        if tabela == 'tecnologia':
+            multiplecategory = item.get('multiplecategory')
+            if not multiplecategory and isinstance(metadata, dict):
+                multiplecategory = metadata.get('multiplecategory')
+            
+            if multiplecategory and isinstance(multiplecategory, list):
+                data['multiplecategory'] = multiplecategory
         
         return data
     
