@@ -3,7 +3,7 @@
 """
 GROQ TABLE CLASSIFIER - Classificador Inteligente de Tabelas
 🤖 Usa Groq AI para decidir em qual tabela cada item deve ser inserido
-✨ Versão refatorada - Oportunidades agora é apenas uma VIEW SQL
+✨ Versão refatorada - SEM pilares, apenas tabelas diretas
 """
 
 import json
@@ -13,10 +13,8 @@ import re
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 
-# Carrega variáveis do arquivo .env
 load_dotenv()
 
-# Chave API Groq - agora lida do .env
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -24,102 +22,167 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 class GroqTableClassifier:
     """Classificador que usa Groq para decidir a tabela correta"""
     
-    # 📋 TABELAS DO BANCO DE DADOS
-    # Organizado por Pilares para melhor organização
-    
+    # 📋 TABELAS DO BANCO - SEM PILARES!
     TABLES_INFO = {
-        # ==================== PILAR 1: VAREJO E CONSUMO DIRETO ====================
-        'bens_consumo': {
-            'desc': 'Bens de consumo diversos e artigos pessoais',
-            'exemplos': 'roupas, calçados, bolsas, acessórios, cosméticos, perfumes, produtos de higiene, joias, relógios, malas',
-            'pilar': 1
+        # ========== VAREJO E CONSUMO ==========
+        'tecnologia': {
+            'desc': 'Eletrônicos e informática',
+            'keywords': ['notebook', 'smartphone', 'tablet', 'computador', 'monitor', 'impressora', 
+                        'camera', 'drone', 'console', 'videogame', 'xbox', 'playstation', 'nintendo',
+                        'smartwatch', 'fone', 'headphone', 'caixa de som', 'roteador', 'switch',
+                        'mouse', 'teclado', 'webcam', 'microfone', 'ssd', 'hd externo', 'pendrive',
+                        'iphone', 'ipad', 'macbook', 'samsung galaxy', 'dell', 'lenovo', 'asus', 'acer',
+                        'gopro', 'dji', 'canon', 'nikon', 'sony alpha']
         },
         'eletrodomesticos': {
-            'desc': 'Eletrodomésticos e linha branca para uso residencial',
-            'exemplos': 'geladeiras, fogões, micro-ondas, lavadoras, secadoras, ar condicionado, ventiladores, purificadores, aspiradores, ferros de passar, cafeteiras, liquidificadores, batedeiras, smart TVs, air fryers',
-            'pilar': 1
+            'desc': 'Eletrodomésticos e linha branca',
+            'keywords': ['geladeira', 'refrigerador', 'fogao', 'cooktop', 'microondas', 'lavadora',
+                        'secadora', 'lava e seca', 'ar condicionado', 'ventilador', 'purificador',
+                        'aspirador', 'ferro de passar', 'cafeteira', 'liquidificador', 'batedeira',
+                        'processador de alimentos', 'smart tv', 'televisao', 'tv led', 'tv oled',
+                        'air fryer', 'fritadeira', 'chaleira', 'torradeira', 'sanduicheira',
+                        'mixer', 'espremedor', 'centrifuga', 'panela eletrica', 'grill',
+                        'brastemp', 'consul', 'electrolux', 'lg', 'samsung tv', 'philips tv',
+                        'panasonic', 'midea', 'britania', 'mondial', 'arno', 'black+decker']
         },
-        'tecnologia': {
-            'desc': 'Produtos eletrônicos e de informática',
-            'exemplos': 'notebooks, smartphones, tablets, computadores, monitores, impressoras, câmeras, drones, consoles de videogame, smartwatches, fones, caixas de som, roteadores, switches, periféricos, componentes de PC',
-            'pilar': 1
+        'bens_consumo': {
+            'desc': 'Bens de consumo pessoais',
+            'keywords': ['roupa', 'calcado', 'sapato', 'tenis', 'bolsa', 'mochila', 'carteira',
+                        'oculos', 'relogio', 'joia', 'colar', 'anel', 'brinco', 'pulseira',
+                        'perfume', 'cosmetico', 'maquiagem', 'mala', 'valise', 'acessorio',
+                        'bone', 'chapeu', 'cachecol', 'luva', 'cinto', 'gravata']
         },
         'veiculos': {
-            'desc': 'QUALQUER meio de transporte ou locomoção, motorizado ou não',
-            'exemplos': 'carros, motos, caminhões, ônibus, tratores, bicicletas, patins, patinetes, skates, scooters, hoverboards, veículos elétricos, jet ski, lanchas, barcos, aeronaves, qualquer coisa usada para se locomover',
-            'pilar': 1
+            'desc': 'QUALQUER meio de transporte ou locomoção',
+            'keywords': ['carro', 'automovel', 'veiculo', 'moto', 'motocicleta', 'caminhao',
+                        'onibus', 'van', 'pickup', 'kombi', 'trator', 'bicicleta', 'bike',
+                        'patinete', 'scooter', 'patins', 'skate', 'hoverboard',
+                        'jet ski', 'lancha', 'barco', 'aeronave', 'aviao', 'helicoptero',
+                        # Marcas
+                        'fiat', 'volkswagen', 'vw', 'ford', 'chevrolet', 'gm', 'honda', 'toyota',
+                        'hyundai', 'nissan', 'renault', 'peugeot', 'citroen', 'jeep', 'mitsubishi',
+                        'suzuki', 'yamaha', 'kawasaki', 'bmw', 'mercedes', 'audi', 'volvo',
+                        'scania', 'iveco',
+                        # Modelos comuns
+                        'civic', 'corolla', 'gol', 'uno', 'palio', 'celta', 'onix', 'hb20',
+                        'ka', 'fiesta', 'sandero', 'logan', 'cg 150', 'cg 160', 'fan', 'titan',
+                        'factor', 'biz', 'pop', 'xre', 'bros']
         },
         'alimentos_bebidas': {
             'desc': 'Alimentos e bebidas',
-            'exemplos': 'alimentos não perecíveis, bebidas, vinhos, cafés, suplementos alimentares, produtos alimentícios',
-            'pilar': 1
+            'keywords': ['alimento', 'comida', 'bebida', 'vinho', 'whisky', 'cerveja', 'cafe',
+                        'cha', 'suco', 'refrigerante', 'agua', 'suplemento', 'vitamina',
+                        'proteina', 'whey', 'barra de cereal', 'chocolate', 'doce']
         },
         
-        # ==================== PILAR 2: CASA E DECORAÇÃO ====================
+        # ========== CASA E DECORAÇÃO ==========
         'moveis_decoracao': {
-            'desc': 'Móveis e itens de decoração',
-            'exemplos': 'sofás, mesas, cadeiras, armários, estantes, camas, colchões, lustres, quadros, tapetes, cortinas, pufes, racks, cristaleiras',
-            'pilar': 2
+            'desc': 'Móveis e decoração',
+            'keywords': ['sofa', 'mesa', 'cadeira', 'poltrona', 'armario', 'guarda-roupa',
+                        'estante', 'rack', 'cama', 'colchao', 'criado-mudo', 'comoda',
+                        'aparador', 'buffet', 'cristaleira', 'escrivaninha', 'banco',
+                        'pufe', 'puff', 'banqueta', 'lustres', 'luminaria', 'abajur',
+                        'quadro', 'espelho', 'tapete', 'cortina', 'persiana', 'almofada',
+                        'carpete', 'decoracao', 'moldura']
         },
         'casa_utilidades': {
-            'desc': 'Utilidades domésticas e itens de casa pequenos',
-            'exemplos': 'panelas, louças, talheres, copos, utensílios de cozinha, organizadores, produtos de limpeza, pequenos objetos domésticos',
-            'pilar': 2
+            'desc': 'Utilidades domésticas',
+            'keywords': ['panela', 'frigideira', 'assadeira', 'forma', 'louça', 'prato',
+                        'tigela', 'bowl', 'talher', 'garfo', 'faca', 'colher', 'copo',
+                        'xicara', 'caneca', 'jarra', 'garrafa termica', 'marmita',
+                        'pote', 'organizador', 'cesto', 'vassoura', 'rodo', 'balde',
+                        'escada', 'varal', 'tabua', 'kit churrasco']
         },
         'artes_colecionismo': {
-            'desc': 'Arte, antiguidades e colecionáveis',
-            'exemplos': 'quadros, esculturas, antiguidades, moedas, selos, itens colecionáveis, obras de arte, objetos raros',
-            'pilar': 2
+            'desc': 'Arte e colecionáveis',
+            'keywords': ['quadro arte', 'pintura', 'escultura', 'estatua', 'obra de arte',
+                        'antiguidade', 'moeda antiga', 'selo', 'colecao', 'colecionavel',
+                        'raridade', 'vintage', 'retro', 'classico', 'reliquia',
+                        'porcelana antiga', 'cristal antigo']
         },
         
-        # ==================== PILAR 3: IMÓVEIS E CONSTRUÇÃO ====================
+        # ========== IMÓVEIS E CONSTRUÇÃO ==========
         'imoveis': {
             'desc': 'Imóveis e propriedades',
-            'exemplos': 'casas, apartamentos, terrenos, galpões, salas comerciais, fazendas, chácaras, sítios, lotes, propriedades rurais',
-            'pilar': 3
+            'keywords': ['imovel', 'casa', 'apartamento', 'apto', 'terreno', 'lote',
+                        'galpao', 'barracao', 'sala comercial', 'loja', 'ponto comercial',
+                        'fazenda', 'sitio', 'chacara', 'rural', 'urbano', 'edificio',
+                        'cobertura', 'kitnet', 'studio', 'flat', 'propriedade',
+                        'area', 'm2', 'm²', 'metro quadrado', 'quarto', 'suite',
+                        'banheiro', 'garagem', 'vaga', 'condominio']
         },
         'materiais_construcao': {
-            'desc': 'Materiais de construção e acabamento',
-            'exemplos': 'cimento, tijolos, telhas, pisos, azulejos, portas, janelas, ferragens, tintas, tubos, madeiras, areia, brita, vergalhões',
-            'pilar': 3
+            'desc': 'Materiais de construção',
+            'keywords': ['cimento', 'tijolo', 'bloco', 'telha', 'piso', 'porcelanato',
+                        'ceramica', 'azulejo', 'revestimento', 'porta', 'janela',
+                        'ferragem', 'dobradiça', 'fechadura', 'tinta', 'verniz',
+                        'tubo', 'cano', 'conexao', 'torneira', 'registro', 'valvula',
+                        'madeira', 'tabua', 'viga', 'areia', 'brita', 'pedra',
+                        'vergalhao', 'ferro', 'aco', 'colunas', 'vigas']
         },
         'industrial_equipamentos': {
-            'desc': 'Equipamentos e máquinas industriais para manufatura',
-            'exemplos': 'tornos, fresadoras, prensas, compressores, geradores, soldas, equipamentos de fábrica, máquinas CNC, injetoras, extrusoras, equipamentos de produção',
-            'pilar': 3
+            'desc': 'Equipamentos industriais',
+            'keywords': ['torno', 'fresadora', 'prensa', 'compressor', 'gerador',
+                        'solda', 'transformador', 'motor industrial', 'bomba industrial',
+                        'valvula industrial', 'maquina cnc', 'serra industrial',
+                        'furadeira industrial', 'lixadeira industrial', 'esmerilhadeira',
+                        'injetora', 'extrusora', 'caldeira', 'forno industrial',
+                        'equipamento de producao', 'linha de producao', 'esteira']
         },
         'maquinas_pesadas_agricolas': {
-            'desc': 'Máquinas pesadas e equipamentos agrícolas',
-            'exemplos': 'retroescavadeiras, escavadeiras, tratores agrícolas, colheitadeiras, plantadeiras, pulverizadores, pás carregadeiras, motoniveladoras, rolos compactadores',
-            'pilar': 3
+            'desc': 'Máquinas pesadas e agrícolas',
+            'keywords': ['retroescavadeira', 'escavadeira', 'pa carregadeira', 'motoniveladora',
+                        'rolo compactador', 'patrol', 'trator agricola', 'colheitadeira',
+                        'plantadeira', 'pulverizador', 'distribuidor de adubo', 'grade',
+                        'arado', 'semeadeira', 'roçadeira', 'enfardadeira', 'guincho',
+                        'empilhadeira', 'bobcat', 'minicarregadeira', 'terraplenagem']
         },
         
-        # ==================== PILAR 4: ESPECIALIDADES E DIVERSOS ====================
+        # ========== ESPECIALIDADES ==========
         'nichados': {
-            'desc': 'Equipamentos e produtos especializados de setores específicos: saúde, odontologia, veterinária, cozinha profissional, laboratórios, estética',
-            'exemplos': 'máquina de raio-x odontológico, cadeira odontológica, autoclave, equipamentos médicos, armários hospitalares, mesas cirúrgicas, coifas industriais, fogões industriais, fornos profissionais, equipamentos de laboratório, centrífugas, equipamentos de estética, câmaras frias',
-            'pilar': 4
+            'desc': 'Equipamentos especializados (médico, odonto, veterinário, estética, cozinha profissional)',
+            'keywords': ['odontologico', 'cadeira odontologica', 'raio-x dental', 'autoclave',
+                        'medico', 'hospitalar', 'clinica', 'maca', 'mesa cirurgica',
+                        'bisturi', 'estetoscopio', 'equipamento medico', 'desfibrilador',
+                        'veterinario', 'maquina veterinaria', 'gaiola veterinaria',
+                        'estetica', 'depilacao laser', 'criolipilise', 'radiofrequencia',
+                        'cozinha profissional', 'fogao industrial', 'forno industrial',
+                        'coifa industrial', 'chapa industrial', 'fritadeira industrial',
+                        'balcao refrigerado', 'camara fria', 'freezer industrial',
+                        'laboratorio', 'centrifuga', 'microscópio', 'balanca analitica',
+                        'estufa laboratorio', 'capela de exaustao']
         },
         'partes_pecas': {
-            'desc': 'Peças, componentes e acessórios avulsos',
-            'exemplos': 'peças automotivas, peças de máquinas, componentes eletrônicos, peças de reposição, sobressalentes, acessórios, partes de equipamentos',
-            'pilar': 4
+            'desc': 'Peças e componentes avulsos',
+            'keywords': ['peca', 'componente', 'reposicao', 'sobressalente', 'acessorio',
+                        'motor (peca)', 'engrenagem', 'rolamento', 'correia', 'filtro',
+                        'vela', 'bateria (peca)', 'alternador', 'radiador', 'bomba (peca)',
+                        'pneu', 'aro', 'disco de freio', 'pastilha', 'amortecedor',
+                        'suspensao', 'cambio (peca)', 'embreagem', 'carburador',
+                        'injetor', 'sensor', 'modulo', 'central', 'chicote']
         },
         'animais': {
             'desc': 'Animais vivos',
-            'exemplos': 'gado, cavalos, aves, animais de estimação, animais de produção, animais de criação',
-            'pilar': 4
+            'keywords': ['gado', 'boi', 'vaca', 'novilho', 'bezerra', 'touro', 'cavalo',
+                        'egua', 'potro', 'jumento', 'mula', 'porco', 'suino', 'galinha',
+                        'frango', 'pato', 'ganso', 'peru', 'ovelha', 'carneiro', 'cabra',
+                        'caprino', 'ovino', 'ave', 'passaro', 'peixe', 'alevino',
+                        'cachorro', 'cao', 'gato', 'felino', 'animal vivo', 'plantel']
         },
         'sucatas_residuos': {
-            'desc': 'Sucatas, resíduos e materiais para reciclagem',
-            'exemplos': 'sucata de metal, materiais recicláveis, resíduos industriais, lotes de descarte, ferro velho, sucata eletrônica',
-            'pilar': 4
+            'desc': 'Sucatas e materiais recicláveis',
+            'keywords': ['sucata', 'residuo', 'reciclavel', 'descarte', 'ferro velho',
+                        'metal sucata', 'aluminio sucata', 'cobre sucata', 'lata',
+                        'papel sucata', 'papelao', 'plastico sucata', 'vidro sucata',
+                        'eletronica sucata', 'bateria usada', 'aparas', 'retalho',
+                        'refugo', 'resto', 'sobra', 'desmontagem']
         },
+        
+        # ========== DIVERSOS (RESTRITO!) ==========
         'diversos': {
-            'desc': '🎯 LOTES MISTOS E ITENS DIVERSOS - Para itens que explicitamente combinam múltiplas categorias diferentes OU descritos como "diversos"',
-            'exemplos': 'APENAS itens com texto literal tipo "itens diversos", "lote misto", "mercadorias variadas" OU combinações explícitas tipo "Kit Notebook + Impressora", "Lote: Cafeteira + Tablet + Fones"',
-            'pilar': 4,
-            'special': True
+            'desc': '⚠️ APENAS lotes explicitamente MISTOS com 2+ categorias diferentes no MESMO lote',
+            'keywords': ['lote misto', 'itens diversos', 'produtos variados', 'mercadorias variadas',
+                        'mix de produtos', 'lote variado']
         }
     }
     
@@ -127,146 +190,135 @@ class GroqTableClassifier:
         self.api_key = GROQ_API_KEY
         self.api_url = GROQ_API_URL
         
-        # Valida se a chave API foi configurada
         if not self.api_key:
-            raise ValueError(
-                "⚠️ GROQ_API_KEY não encontrada! "
-                "Configure a variável de ambiente no arquivo .env"
-            )
+            raise ValueError("⚠️ GROQ_API_KEY não encontrada! Configure no .env")
         
-        # Estatísticas
         self.stats = {
             'total': 0,
-            'success': 0,
-            'failed': 0,
+            'groq_classifications': 0,
+            'pre_classifications': 0,
             'diversos': 0,
-            'pre_classified_vehicles': 0,
+            'failed': 0,
             'by_table': {}
         }
     
-    def _is_explicit_diversos(self, item: Dict) -> bool:
+    def _is_truly_mixed_lot(self, item: Dict) -> bool:
         """
-        Verifica se o item deve ir para 'diversos' SEM usar Groq
-        Apenas para casos EXPLÍCITOS de lotes mistos
+        Verifica se é REALMENTE um lote misto (2+ categorias DIFERENTES).
+        Deve ser MUITO restritivo - apenas casos óbvios.
         
-        Returns:
-            bool: True se for diversos explícito
+        Exemplos que SÃO diversos:
+        - "Lote: Cafeteira + Notebook + Mesa"
+        - "Kit com itens diversos: eletrodoméstico, móvel, eletrônico"
+        - "Mercadorias variadas - tecnologia e móveis"
+        
+        Exemplos que NÃO são diversos:
+        - "Notebook Dell com mouse e teclado" (tudo tecnologia)
+        - "Conjunto de panelas" (tudo casa_utilidades)
+        - "Kit 3 cadeiras + mesa" (tudo móveis)
         """
         title = item.get('title', '').lower()
-        description = item.get('description', '').lower()
-        text = f"{title} {description}"
+        desc = item.get('description', '').lower()
+        text = f"{title} {desc}"
         
-        # Padrões EXPLÍCITOS de lotes diversos/mistos (bem específicos!)
-        diversos_patterns = [
-            r'\bitens?\s+diversos\b',
-            r'\bdiversos\s+itens?\b',
+        # 1️⃣ PADRÕES EXPLÍCITOS de texto "diversos/misto/variado"
+        explicit_patterns = [
             r'\blote\s+misto\b',
             r'\blote\s+variado\b',
+            r'\bitens?\s+diversos\b',
+            r'\bdiversos\s+itens?\b',
             r'\bmercadorias?\s+variadas?\b',
             r'\bprodutos?\s+variados?\b',
-            r'\bmix\s+de\b',
-            r'\blote\s+com\s+diversos\b',
-            r'\bvarios\s+itens?\b',
-            r'\blote\s+de\s+produtos?\s+variados?\b',
+            r'\bmix\s+de\s+produtos?\b',
+            r'\blote\s+com\s+diversos\b'
         ]
         
-        for pattern in diversos_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
+        has_explicit = any(re.search(p, text, re.IGNORECASE) for p in explicit_patterns)
         
-        # Detecta combinações explícitas tipo "Notebook + Impressora"
-        # Procura por múltiplos itens separados por + ou ,
-        plus_pattern = r'(\w+)\s*\+\s*(\w+)'
-        if re.search(plus_pattern, title, re.IGNORECASE):
-            # Verifica se tem pelo menos 2 categorias diferentes mencionadas
-            categories_mentioned = []
-            title_lower = title.lower()
-            
-            # Palavras-chave de diferentes categorias
-            category_keywords = {
-                'tecnologia': ['notebook', 'tablet', 'smartphone', 'celular', 'computador', 'monitor'],
-                'eletrodomesticos': ['geladeira', 'fogao', 'lavadora', 'microondas', 'cafeteira'],
-                'moveis': ['mesa', 'cadeira', 'sofa', 'armario'],
-                'casa': ['panela', 'louça', 'copo', 'prato']
-            }
-            
-            for cat, keywords in category_keywords.items():
-                for keyword in keywords:
-                    if keyword in title_lower:
-                        categories_mentioned.append(cat)
-                        break
-            
-            # Se menciona 2+ categorias diferentes, é diversos
-            if len(set(categories_mentioned)) >= 2:
-                return True
+        if not has_explicit:
+            return False
         
-        return False
+        # 2️⃣ Se tem texto "diversos", verifica se REALMENTE menciona categorias diferentes
+        categories_found = set()
+        
+        category_indicators = {
+            'tecnologia': ['notebook', 'tablet', 'smartphone', 'impressora', 'monitor', 'computador'],
+            'eletrodomesticos': ['geladeira', 'fogao', 'microondas', 'tv', 'televisao', 'lavadora'],
+            'moveis': ['sofa', 'mesa', 'cadeira', 'armario', 'cama', 'estante'],
+            'casa_utilidades': ['panela', 'prato', 'copo', 'talher', 'louça'],
+            'veiculos': ['carro', 'moto', 'caminhao', 'bicicleta'],
+            'imoveis': ['casa', 'apartamento', 'terreno', 'imovel']
+        }
+        
+        for category, indicators in category_indicators.items():
+            if any(indicator in text for indicator in indicators):
+                categories_found.add(category)
+        
+        # Se menciona 2+ categorias diferentes, é diversos
+        return len(categories_found) >= 2
     
-    def _is_obvious_vehicle(self, item: Dict) -> bool:
+    def _pre_classify_obvious(self, item: Dict) -> Optional[str]:
         """
-        Detecta veículos óbvios sem precisar chamar Groq
-        
-        Returns:
-            bool: True se for veículo óbvio
+        Pré-classifica itens óbvios SEM usar Groq.
+        Economiza chamadas de API e melhora velocidade.
         """
         title = item.get('title', '').lower()
+        desc = item.get('description', '').lower()
+        text = f"{title} {desc}"
         
-        # Marcas de veículos
-        vehicle_brands = [
-            'fiat', 'volkswagen', 'vw', 'ford', 'chevrolet', 'gm',
-            'honda', 'toyota', 'hyundai', 'nissan', 'renault',
-            'peugeot', 'citroen', 'jeep', 'mitsubishi', 'suzuki',
-            'yamaha', 'kawasaki', 'bmw', 'mercedes', 'audi',
-            'volvo', 'scania', 'iveco', 'mercedes-benz'
-        ]
+        # Remove metadata que pode confundir (ex: "categoria: veiculos")
+        text = re.sub(r'categoria\s*:\s*\w+', '', text)
+        text = re.sub(r'secao\s*:\s*\w+', '', text)
         
-        # Modelos comuns
-        vehicle_models = [
-            'civic', 'corolla', 'gol', 'uno', 'palio', 'celta',
-            'onix', 'hb20', 'ka', 'fiesta', 'sandero', 'logan',
-            'cg 150', 'cg 160', 'fan', 'titan', 'factor', 'biz'
-        ]
+        # Conta matches por tabela
+        matches_by_table = {}
         
-        # Palavras-chave de veículos
-        vehicle_keywords = [
-            'carro', 'moto', 'caminhao', 'caminhão', 'onibus', 'ônibus',
-            'motocicleta', 'automovel', 'automóvel', 'veiculo', 'veículo',
-            'pickup', 'van', 'kombi', 'bicicleta', 'bike', 'patinete',
-            'scooter', 'jet ski', 'lancha', 'barco', 'aeronave'
-        ]
+        for table, info in self.TABLES_INFO.items():
+            if table == 'diversos':  # Pula diversos na pré-classificação
+                continue
+            
+            keywords = info.get('keywords', [])
+            matches = sum(1 for kw in keywords if kw in text)
+            
+            if matches > 0:
+                matches_by_table[table] = matches
         
-        # Verifica marcas
-        for brand in vehicle_brands:
-            if brand in title:
-                return True
+        # Se nenhum match, retorna None (vai pro Groq)
+        if not matches_by_table:
+            return None
         
-        # Verifica modelos
-        for model in vehicle_models:
-            if model in title:
-                return True
+        # Retorna tabela com mais matches
+        best_table = max(matches_by_table.items(), key=lambda x: x[1])
         
-        # Verifica palavras-chave
-        for keyword in vehicle_keywords:
-            if keyword in title:
-                return True
+        # Só retorna se tiver pelo menos 2 matches (mais confiante)
+        if best_table[1] >= 2:
+            return best_table[0]
         
-        # Padrão de ano (ex: "2020", "2015/2016")
-        if re.search(r'\b(19|20)\d{2}\b', title):
-            # Se tem ano, verifica se não é imóvel
-            if not any(word in title for word in ['apartamento', 'casa', 'terreno', 'sala', 'lote']):
-                return True
+        # Se só 1 match mas muito óbvio (ex: marca de carro), aceita
+        obvious_single_match_tables = ['veiculos', 'imoveis']
+        if best_table[1] == 1 and best_table[0] in obvious_single_match_tables:
+            # Verifica se é match forte
+            table_keywords = self.TABLES_INFO[best_table[0]]['keywords']
+            strong_keywords = {
+                'veiculos': ['fiat', 'ford', 'honda', 'toyota', 'yamaha', 'civic', 'corolla'],
+                'imoveis': ['apartamento', 'terreno', 'casa', 'lote', 'imovel']
+            }
+            
+            if best_table[0] in strong_keywords:
+                if any(kw in text for kw in strong_keywords[best_table[0]]):
+                    return best_table[0]
         
-        return False
+        return None
     
     def classify(self, item: Dict) -> Optional[str]:
         """
-        Classifica um item e retorna o nome da tabela
+        Classifica um item e retorna o nome da tabela.
         
-        Args:
-            item: Dict com 'title' e opcionalmente 'description'
-        
-        Returns:
-            Nome da tabela (ex: 'tecnologia', 'veiculos') ou None se falhar
+        Fluxo:
+        1. Verifica se é lote misto EXPLÍCITO → diversos
+        2. Tenta pré-classificação com keywords → tabela específica
+        3. Usa Groq AI → tabela específica
+        4. Fallback → diversos
         """
         title = item.get('title', '').strip()
         description = item.get('description', '')[:500]
@@ -276,133 +328,125 @@ class GroqTableClassifier:
             self.stats['total'] += 1
             return None
         
-        # PRÉ-VERIFICAÇÃO 1: Verifica se é "diversos" explícito
-        if self._is_explicit_diversos(item):
+        # 1️⃣ VERIFICA SE É LOTE MISTO EXPLÍCITO
+        if self._is_truly_mixed_lot(item):
             self.stats['diversos'] += 1
             self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
             self.stats['total'] += 1
-            # Debug primeiros diversos
-            if self.stats['diversos'] <= 10:
-                print(f"  🎨 Diversos detectado: '{title[:70]}'")
+            
+            # Debug primeiros
+            if self.stats['diversos'] <= 5:
+                print(f"  🎨 DIVERSOS (misto real): '{title[:70]}'")
+            
             return 'diversos'
         
-        # PRÉ-VERIFICAÇÃO 2: Verifica se é veículo óbvio
-        if self._is_obvious_vehicle(item):
-            self.stats['pre_classified_vehicles'] += 1
-            self.stats['by_table']['veiculos'] = self.stats['by_table'].get('veiculos', 0) + 1
-            self.stats['total'] += 1
-            # Debug primeiros veículos
-            if self.stats['pre_classified_vehicles'] <= 10:
-                print(f"  ✅ Veículo detectado: '{title[:70]}'")
-            return 'veiculos'
+        # 2️⃣ PRÉ-CLASSIFICAÇÃO COM KEYWORDS
+        pre_classified = self._pre_classify_obvious(item)
         
-        # Classifica com Groq
+        if pre_classified:
+            self.stats['pre_classifications'] += 1
+            self.stats['by_table'][pre_classified] = self.stats['by_table'].get(pre_classified, 0) + 1
+            self.stats['total'] += 1
+            
+            # Debug primeiros de cada categoria
+            table_count = self.stats['by_table'][pre_classified]
+            if table_count <= 3:
+                print(f"  ⚡ PRÉ-CLASS {pre_classified}: '{title[:60]}'")
+            
+            return pre_classified
+        
+        # 3️⃣ CLASSIFICAÇÃO COM GROQ
         table_name = self._classify_with_groq(title, description)
         
-        if table_name:
-            self.stats['success'] += 1
+        if table_name and table_name != 'diversos':
+            self.stats['groq_classifications'] += 1
             self.stats['by_table'][table_name] = self.stats['by_table'].get(table_name, 0) + 1
             self.stats['total'] += 1
+            
+            # Debug primeiros
+            if self.stats['groq_classifications'] <= 10:
+                print(f"  🤖 GROQ {table_name}: '{title[:60]}'")
+            
             return table_name
         
-        # Fallback para diversos
+        # 4️⃣ FALLBACK: DIVERSOS (último recurso)
         self.stats['diversos'] += 1
         self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
         self.stats['total'] += 1
+        
         return 'diversos'
     
     def _classify_with_groq(self, title: str, description: str) -> Optional[str]:
-        """
-        Classifica com Groq e retorna a tabela
-        
-        Returns:
-            str: nome da tabela ou None se falhar
-        """
-        prompt = self._build_classification_prompt(title, description)
+        """Classifica com Groq e retorna a tabela"""
+        prompt = self._build_prompt(title, description)
         
         try:
             response = self._call_groq(prompt)
             
             if response:
-                # Parse da resposta - deve ser apenas uma categoria
                 response_clean = response.strip().lower()
                 
-                # Remove possíveis explicações extras
+                # Remove explicações extras
                 if '\n' in response_clean:
                     response_clean = response_clean.split('\n')[0]
                 
-                # Remove espaços e possíveis vírgulas/separadores
                 response_clean = response_clean.replace(',', '').replace(';', '').strip()
                 
-                # Valida se é uma tabela válida
+                # Valida se é tabela válida
                 if response_clean in self.TABLES_INFO:
                     return response_clean
             
             return None
         
         except Exception as e:
-            print(f"⚠️ Erro na classificação: {e}")
+            print(f"⚠️ Erro Groq: {e}")
             return None
     
-    def _build_classification_prompt(self, title: str, description: str) -> str:
-        """Monta o prompt para o Groq"""
+    def _build_prompt(self, title: str, description: str) -> str:
+        """Monta prompt direto para Groq"""
         
-        # Lista de tabelas (incluindo diversos, mas com sua descrição especial)
-        tables_list = []
-        for table, info in self.TABLES_INFO.items():
-            tables_list.append(f"- {table}: {info['desc']}")
-            tables_list.append(f"  Exemplos: {info['exemplos']}")
+        # Lista simples de tabelas
+        tables_list = "\n".join([
+            f"- {table}: {info['desc']}"
+            for table, info in self.TABLES_INFO.items()
+        ])
         
-        tables_text = "\n".join(tables_list)
-        
-        prompt = f"""Você é um classificador de leilões brasileiro. Analise o item e identifique a categoria MAIS ESPECÍFICA.
+        prompt = f"""Você é um classificador de leilões brasileiro. Identifique a categoria MAIS ESPECÍFICA.
 
-CATEGORIAS DISPONÍVEIS:
-{tables_text}
+CATEGORIAS:
+{tables_list}
 
-ITEM PARA CLASSIFICAR:
+ITEM:
 Título: {title}
-Descrição: {description[:300] if description else 'Não disponível'}
+Descrição: {description[:300] if description else 'N/A'}
 
-REGRAS CRÍTICAS - LEIA COM ATENÇÃO:
+REGRAS CRÍTICAS:
 
-🚗 VEÍCULOS (PRIORIDADE MÁXIMA):
-- Carros, motos, caminhões, ônibus → SEMPRE "veiculos"
-- Bicicletas, patins, patinetes, skates → SEMPRE "veiculos"
-- Se mencionar marca (Fiat, VW, Honda, Yamaha, Ford, etc) → "veiculos"
-- Se mencionar modelo (Civic, Gol, Corolla, CG, etc) → "veiculos"
-- Se mencionar ano do veículo → "veiculos"
-- Qualquer coisa que serve para locomoção → "veiculos"
+🏠 IMÓVEIS (máxima prioridade):
+- Casa, apartamento, terreno, lote, galpão → "imoveis"
+- Se mencionar m², quartos, suítes → "imoveis"
 
-🏠 IMÓVEIS:
-- Casas, apartamentos, terrenos, lotes → "imoveis"
-- Nunca confunda imóveis com veículos
+🚗 VEÍCULOS:
+- Carro, moto, caminhão, ônibus, bicicleta → "veiculos"
+- Se mencionar marca (Fiat, Honda, etc) → "veiculos"
 
-🔧 NICHADOS (equipamentos especializados):
-- Odontológico, hospitalar, laboratório → "nichados"
-- Cozinha industrial, fogão industrial → "nichados"
+💻 TECNOLOGIA vs 📺 ELETRODOMÉSTICOS:
+- Notebook, smartphone, impressora → "tecnologia"
+- Smart TV, geladeira, fogão, air fryer → "eletrodomesticos"
 
-📺 ELETRODOMÉSTICOS vs TECNOLOGIA:
-- Smart TV, geladeira, fogão, lavadora → "eletrodomesticos"
-- Air Fryer, cafeteira, micro-ondas → "eletrodomesticos"
-- Notebook, tablet, smartphone, impressora → "tecnologia"
+🔧 NICHADOS:
+- Odontológico, hospitalar, cozinha industrial → "nichados"
 
-🎯 DIVERSOS:
-- SOMENTE se título diz "lote misto" ou "itens diversos"
+⚠️ DIVERSOS:
+- APENAS se explicitamente "lote misto" com categorias diferentes
 - Se tem categoria clara, NÃO use diversos
-
-IMPORTANTE: 
-- Responda APENAS o nome da categoria
-- Uma palavra, sem explicação
-- Em caso de dúvida entre 2 categorias, escolha a MAIS ESPECÍFICA
 
 RESPOSTA (apenas o nome da categoria):"""
         
         return prompt
     
     def _call_groq(self, prompt: str) -> Optional[str]:
-        """Chama a API Groq"""
-        
+        """Chama API Groq"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -413,7 +457,7 @@ RESPOSTA (apenas o nome da categoria):"""
             "messages": [
                 {
                     "role": "system",
-                    "content": "Você é um classificador preciso de leilões. Responda APENAS com o nome da categoria. Uma palavra. Sem explicações."
+                    "content": "Você é um classificador preciso. Responda APENAS com o nome da categoria. Uma palavra."
                 },
                 {
                     "role": "user",
@@ -426,12 +470,7 @@ RESPOSTA (apenas o nome da categoria):"""
         }
         
         try:
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+            response = requests.post(self.api_url, headers=headers, json=payload, timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
@@ -441,11 +480,11 @@ RESPOSTA (apenas o nome da categoria):"""
             return None
         
         except Exception as e:
-            print(f"⚠️ Erro na chamada Groq: {e}")
+            print(f"⚠️ Erro chamada Groq: {e}")
             return None
     
     def get_stats(self) -> Dict:
-        """Retorna estatísticas de classificação"""
+        """Retorna estatísticas"""
         return self.stats.copy()
     
     def print_stats(self):
@@ -454,179 +493,81 @@ RESPOSTA (apenas o nome da categoria):"""
         print("📊 ESTATÍSTICAS DE CLASSIFICAÇÃO GROQ")
         print("="*80)
         print(f"Total processado: {self.stats['total']}")
-        print(f"Sucesso (via Groq): {self.stats['success']} ({self.stats['success']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Veículos (pré-classificação): {self.stats['pre_classified_vehicles']} ({self.stats['pre_classified_vehicles']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"Diversos (pré-classificação): {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Pré-classificações (keywords): {self.stats['pre_classifications']} ({self.stats['pre_classifications']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Classificações Groq: {self.stats['groq_classifications']} ({self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Diversos (lotes mistos): {self.stats['diversos']} ({self.stats['diversos']/max(self.stats['total'],1)*100:.1f}%)")
         print(f"Falhas: {self.stats['failed']}")
         
         if self.stats['by_table']:
-            # Organiza por pilar
-            by_pillar = {1: {}, 2: {}, 3: {}, 4: {}}
-            for table, count in self.stats['by_table'].items():
-                pilar = self.TABLES_INFO.get(table, {}).get('pilar', 4)
-                by_pillar[pilar][table] = count
-            
-            pilar_names = {
-                1: "🛒 PILAR 1: Varejo e Consumo Direto",
-                2: "🏠 PILAR 2: Casa e Decoração",
-                3: "🏗️  PILAR 3: Imóveis e Construção",
-                4: "🎯 PILAR 4: Especialidades e Diversos"
-            }
-            
-            print(f"\n📦 DISTRIBUIÇÃO POR PILAR E TABELA:")
+            print(f"\n📦 DISTRIBUIÇÃO POR TABELA:")
             print("-" * 80)
             
-            for pilar_num in [1, 2, 3, 4]:
-                if by_pillar[pilar_num]:
-                    pilar_total = sum(by_pillar[pilar_num].values())
-                    pilar_pct = pilar_total / self.stats['total'] * 100
-                    print(f"\n{pilar_names[pilar_num]}")
-                    print(f"Total: {pilar_total} itens ({pilar_pct:.1f}%)")
-                    print("-" * 80)
-                    
-                    for table, count in sorted(by_pillar[pilar_num].items(), key=lambda x: x[1], reverse=True):
-                        pct = count / self.stats['total'] * 100
-                        bar_length = int(pct / 2)  # Escala a barra
-                        bar = "█" * bar_length
-                        
-                        # Emoji especial para diversos
-                        emoji = "🎨" if table == 'diversos' else "  "
-                        
-                        print(f"{emoji} {table:.<35} {count:>6} ({pct:>5.1f}%) {bar}")
+            for table, count in sorted(self.stats['by_table'].items(), key=lambda x: x[1], reverse=True):
+                pct = count / self.stats['total'] * 100
+                bar_length = int(pct / 2)
+                bar = "█" * bar_length
+                
+                emoji = "🎨" if table == 'diversos' else "  "
+                print(f"{emoji} {table:.<35} {count:>6} ({pct:>5.1f}%) {bar}")
         
         print("="*80)
 
 
-# Função auxiliar para uso fácil
+# Função auxiliar
 def classify_item_to_table(item: Dict) -> str:
-    """
-    Classifica um item e retorna a tabela
-    
-    Args:
-        item: Dict com 'title' e opcionalmente 'description'
-    
-    Returns:
-        Nome da tabela (string)
-    """
+    """Classifica um item e retorna a tabela"""
     classifier = GroqTableClassifier()
     return classifier.classify(item) or 'diversos'
 
 
 if __name__ == "__main__":
-    print("\n🤖 TESTANDO CLASSIFICADOR GROQ - VERSÃO REFATORADA\n")
+    print("\n🤖 TESTANDO CLASSIFICADOR - VERSÃO SEM PILARES\n")
     print("="*80)
     
     classifier = GroqTableClassifier()
     
     test_items = [
-        # ==================== DIVERSOS (EXPLÍCITOS) ====================
-        {
-            "title": "Lote com Itens Diversos",
-            "description": "Vários produtos de diferentes categorias"
-        },
-        {
-            "title": "Lote Misto de Mercadorias",
-            "description": "Produtos variados"
-        },
-        {
-            "title": "Kit: Notebook Dell + Impressora HP + Mouse Logitech",
-            "description": "Combo de equipamentos de informática"
-        },
-        {
-            "title": "Cafeteira Philips + Tablet Samsung + Fones JBL",
-            "description": "Lote combinado"
-        },
+        # IMÓVEIS (devem ir para imoveis, não diversos!)
+        {"title": "Apartamento 2 Quartos - 65m²", "description": "Apto com 2 quartos, sala, cozinha"},
+        {"title": "Casa 3 Dormitórios Centro", "description": "Casa de 120m² com garagem"},
+        {"title": "Terreno 250m² Residencial", "description": "Lote em condomínio fechado"},
         
-        # ==================== ELETRODOMÉSTICOS ====================
-        {
-            "title": "Smart TV Samsung 55 Polegadas 4K",
-            "description": "Televisão inteligente com sistema operacional"
-        },
-        {
-            "title": "Air Fryer Philips Walita com Conectividade",
-            "description": "Fritadeira elétrica com app"
-        },
-        {
-            "title": "Geladeira Brastemp Inverse",
-            "description": "Geladeira frost free"
-        },
-        {
-            "title": "Micro-ondas Electrolux 30L",
-            "description": "Micro-ondas com grill"
-        },
-        {
-            "title": "Cafeteira Nespresso Inissia",
-            "description": "Máquina de café expresso"
-        },
+        # VEÍCULOS
+        {"title": "Fiat Uno 2015 Completo", "description": "Carro 4 portas"},
+        {"title": "Honda CG 160 2020", "description": "Moto em bom estado"},
+        {"title": "Bicicleta Caloi Aro 29", "description": "Mountain bike 21 marchas"},
         
-        # ==================== TECNOLOGIA ====================
-        {
-            "title": "Notebook Dell Inspiron 15",
-            "description": "Notebook com Intel Core i5 e 8GB RAM"
-        },
-        {
-            "title": "iPhone 13 Pro Max 256GB",
-            "description": "Smartphone Apple"
-        },
-        {
-            "title": "iPad 9ª Geração",
-            "description": "Tablet Apple com 64GB"
-        },
-        {
-            "title": "Impressora HP LaserJet Pro",
-            "description": "Impressora multifuncional"
-        },
+        # TECNOLOGIA
+        {"title": "Notebook Dell Inspiron i5 8GB", "description": "Notebook completo"},
+        {"title": "iPhone 13 Pro 256GB", "description": "Smartphone Apple"},
+        {"title": "Impressora HP LaserJet", "description": "Multifuncional"},
         
-        # ==================== VEÍCULOS ====================
-        {
-            "title": "Bicicleta Caloi Mountain Bike Aro 29",
-            "description": "Bicicleta 21 marchas"
-        },
-        {
-            "title": "Patinete Elétrico Xiaomi",
-            "description": "Patinete com autonomia de 30km"
-        },
-        {
-            "title": "Civic 2020 Automático",
-            "description": "Honda Civic completo"
-        },
+        # ELETRODOMÉSTICOS
+        {"title": "Smart TV Samsung 55\" 4K", "description": "Televisão inteligente"},
+        {"title": "Geladeira Brastemp Inverse", "description": "Frost free 400L"},
+        {"title": "Air Fryer Philips Walita", "description": "Fritadeira 4L"},
         
-        # ==================== MÓVEIS ====================
-        {
-            "title": "Sofá 3 Lugares Retrátil",
-            "description": "Sofá em tecido cinza"
-        },
-        {
-            "title": "Mesa de Jantar 6 Cadeiras",
-            "description": "Conjunto completo"
-        },
+        # MÓVEIS
+        {"title": "Sofá 3 Lugares Retrátil", "description": "Sofá tecido cinza"},
+        {"title": "Mesa Jantar 6 Cadeiras", "description": "Conjunto completo"},
         
-        # ==================== NICHADOS ====================
-        {
-            "title": "Cadeira Odontológica Kavo",
-            "description": "Equipamento odontológico completo"
-        },
-        {
-            "title": "Autoclave Cristofoli 21L",
-            "description": "Autoclave para esterilização"
-        },
-        {
-            "title": "Fogão Industrial 6 Bocas",
-            "description": "Fogão profissional para cozinha comercial"
-        },
+        # DIVERSOS (VERDADEIROS - lotes mistos)
+        {"title": "Lote Misto: Geladeira + Notebook + Mesa", "description": "Produtos variados"},
+        {"title": "Kit Diversos: TV + Bicicleta + Panelas", "description": "Lote com categorias diferentes"},
+        
+        # NÃO DEVEM ser diversos (mesmo tendo múltiplos itens da MESMA categoria)
+        {"title": "Kit 3 Cadeiras + Mesa Jantar", "description": "Conjunto de móveis"},
+        {"title": "Lote 10 Notebooks Dell e HP", "description": "Notebooks diversos modelos"},
     ]
     
-    print("\n🔍 CLASSIFICANDO ITENS DE TESTE...\n")
+    print("🔍 CLASSIFICANDO ITENS DE TESTE...\n")
     
     for i, item in enumerate(test_items, 1):
         table = classifier.classify(item)
-        
         print(f"{i:02d}. '{item['title'][:65]}'")
         print(f"    └─ 📂 Tabela: {table}")
         print()
     
-    # Imprime estatísticas
     classifier.print_stats()
-    
     print("\n✅ Teste concluído!")
     print("="*80)
