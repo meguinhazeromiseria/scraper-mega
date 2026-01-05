@@ -27,7 +27,7 @@ jobs:
       
       - name: Install Dependencies
         run: |
-          pip install requests playwright beautifulsoup4 python-dotenv supabase groq
+          pip install -r requirements.txt
           playwright install chromium
           playwright install-deps
       
@@ -36,6 +36,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/scrapers
         run: |
           echo "========================================"
           echo "🟣 SODRÉ SANTORO - DOMÍNIO COMPLETO"

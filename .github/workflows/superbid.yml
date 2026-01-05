@@ -27,13 +27,14 @@ jobs:
       
       - name: Install Dependencies
         run: |
-          pip install requests python-dotenv supabase groq
+          pip install -r requirements.txt
       
       - name: Run Superbid Scraper (Domínio Completo)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/scrapers
         run: |
           echo "========================================"
           echo "🔵 SUPERBID - DOMÍNIO COMPLETO"
