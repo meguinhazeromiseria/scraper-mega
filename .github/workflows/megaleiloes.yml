@@ -12,7 +12,7 @@ on:
 jobs:
   megaleiloes-scraper:
     name: 🟢 MegaLeilões - Scrape Completo
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 120
     
     steps:
@@ -23,13 +23,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       
       - name: Install Dependencies
         run: |
-          pip install -r requirements.txt
-          playwright install chromium
-          playwright install-deps
+          pip install requests==2.31.0 beautifulsoup4==4.12.3 python-dotenv==1.0.1
+          pip install supabase==2.3.4 groq==0.9.0
+          pip install playwright==1.48.0
+          playwright install chromium --with-deps
       
       - name: Run MegaLeilões Scraper (Domínio Completo)
         env:
