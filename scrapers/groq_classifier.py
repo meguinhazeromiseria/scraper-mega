@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-GROQ TABLE CLASSIFIER v2.0 - Classificador Inteligente de Tabelas
-🤖 Pré-classificador (70-80%) + Groq AI (20-30%) = 100% cobertura
-✨ Cobre TODAS as 17 categorias + minimiza "diversos"
+GROQ TABLE CLASSIFIER v3.0 - 100% Powered by Groq AI
+🤖 Llama 3.3 70B Versatile - Zero keywords, full intelligence
+✨ Classifica em todas as 17 tabelas com raciocínio contextual
 """
 
 import json
 import requests
 import os
-import re
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from dotenv import load_dotenv
-from category_indicators import (
-    TABLES_INFO,
-    MIXED_LOT_CATEGORY_INDICATORS,
-    FINANCIAL_ABSTRACT_KEYWORDS
-)
 
 load_dotenv()
 
@@ -26,10 +20,8 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 class GroqTableClassifier:
     """
-    Classificador híbrido:
-    1. Pré-classificador (keywords fortes) → 70-80% dos casos
-    2. Groq AI (casos complexos) → 20-30% dos casos
-    3. Fallback conservador → apenas casos impossíveis
+    Classificador 100% Groq AI - Zero keywords, full context understanding.
+    Llama 3.3 70B analisa contexto, função e características para decidir.
     """
     
     def __init__(self):
@@ -41,338 +33,73 @@ class GroqTableClassifier:
         
         self.stats = {
             'total': 0,
-            'pre_classified': 0,      # Pré-classificador
-            'groq_classifications': 0, # Groq AI
-            'financial_blocked': 0,    # Financeiros
-            'mixed_detected': 0,       # Mistos
-            'failed': 0,               # Fallback
+            'successful': 0,
+            'failed': 0,
             'by_table': {}
         }
-    
-    def _is_financial_abstract(self, item: Dict) -> bool:
-        """
-        Detecta itens financeiros/abstratos (sempre → diversos).
-        Ex: ações, créditos, marcas, direitos, patentes
-        """
-        text = f"{item.get('normalized_title', '')} {item.get('description', '')}".lower()
-        return any(kw in text for kw in FINANCIAL_ABSTRACT_KEYWORDS)
-    
-    def _is_obvious_mixed_lot(self, item: Dict) -> bool:
-        """
-        Detecta lotes EXPLICITAMENTE mistos no título.
-        Ex: "TVs, Geladeiras, Micro-ondas, Bebedouro e Telefone"
-        """
-        title = item.get('normalized_title', '').lower()
         
-        # Detecta múltiplos itens separados por vírgula (3+)
-        if not re.search(r'\w+\s*,\s*\w+.*,\s*\w+', title):
-            return False
-        
-        # Verifica se são categorias MUITO diferentes
-        categories_found = set()
-        
-        for category, indicators in MIXED_LOT_CATEGORY_INDICATORS.items():
-            if any(indicator in title for indicator in indicators):
-                categories_found.add(category)
-        
-        return len(categories_found) >= 2
-    
-    def _try_obvious_classification(self, title: str, description: str) -> Optional[str]:
-        """
-        PRÉ-CLASSIFICADOR: Detecta casos ÓBVIOS com keywords fortes.
-        Cobre TODAS as 17 categorias. Economiza chamadas ao Groq.
-        
-        Retorna: categoria ou None (se não conseguir classificar)
-        """
-        text = f"{title} {description}".lower()
-        
-        # 1️⃣ IMÓVEIS (prioridade máxima - 80% dos casos no megaleiloes)
-        imovel_kw = [
-            'apartamento', 'casa ', 'terreno', 'lote ', 'sala comercial',
-            'galpao', 'imovel', 'propriedade', ' m2', ' m²', 'metro quadrado',
-            'quarto', 'suite', 'vaga ', 'garagem', 'fazenda', 'sitio', 'chacara',
-            'edificio', 'cobertura', 'kitnet', 'studio', 'flat', 'condominio',
-            'area rural', 'area urbana'
-        ]
-        if any(kw in text for kw in imovel_kw):
-            # Evita falsos positivos (miniaturas, peças)
-            if not any(x in text for x in ['peca', 'componente', 'miniatura', 'brinquedo']):
-                return 'imoveis'
-        
-        # 2️⃣ VEÍCULOS (prioridade máxima - 10% dos casos)
-        veiculo_kw = [
-            'carro ', 'automovel', 'veiculo', ' moto ', 'motocicleta',
-            'caminhao', 'onibus', ' van ', 'pickup', 'bicicleta', 'bike ',
-            'jet ski', 'lancha', 'barco', 'aviao', 'aeronave', 'helicoptero',
-            # Marcas comuns
-            'fiat ', 'ford ', 'chevrolet', 'honda ', 'toyota', 'volkswagen',
-            'hyundai', 'renault', 'nissan', 'peugeot',
-            # Modelos comuns
-            'civic', 'corolla', 'gol ', 'uno ', 'palio', 'onix', 'hb20',
-            'sandero', 'logan', 'cg 150', 'cg 160', 'fan ', 'titan'
-        ]
-        if any(kw in text for kw in veiculo_kw):
-            # Evita peças avulsas
-            if not any(x in text for x in ['peca', 'motor (peca)', 'bateria (peca)', 'miniatura']):
-                return 'veiculos'
-        
-        # 3️⃣ NICHADOS (alta prioridade - equipamentos profissionais)
-        nichado_kw = [
-            # Farmácia/Medicamentos
-            'medicamento', 'farmacia', 'farmaceutico', 'produto de higiene',
-            'higiene hospitalar', 'produto hospitalar', 'vitamina',
-            'material hospitalar', 'insumo medico',
-            # Odontológico
-            'odontologic', 'cadeira odontologic', 'dentista', 'consultorio odontologico',
-            'equipo odontologico', 'autoclave', 'raio x dental', 'kavo', 'gnatus',
-            # Médico/Hospitalar
-            'equipamento medico', 'hospitalar', 'maca', 'mesa cirurgica',
-            'desfibrilador', 'monitor de sinais', 'clinica',
-            # Veterinário
-            'veterinario', 'clinica veterinaria', 'mesa veterinaria',
-            # Estética
-            'depilacao laser', 'criolipilise', 'radiofrequencia', 'estetica profissional',
-            # Cozinha Industrial
-            'fogao industrial', 'geladeira industrial', 'refrigerador industrial',
-            'cozinha industrial', 'cozinha profissional', 'forno industrial',
-            'fogao 6 bocas', 'coifa industrial', 'camara fria', 'freezer industrial',
-            'balcao refrigerado', 'mesa inox', 'pia inox', 'bancada inox',
-            'equipamento gastronomico', 'pass through',
-            # Laboratório
-            'laboratorio', 'centrifuga', 'microscopio', 'balanca analitica'
-        ]
-        if any(kw in text for kw in nichado_kw):
-            return 'nichados'
-        
-        # 4️⃣ TECNOLOGIA
-        tech_kw = [
-            'notebook', 'computador', 'impressora', 'smartphone', 'celular',
-            'tablet', 'iphone', 'ipad', 'samsung galaxy', 'servidor',
-            'monitor ', 'camera digital', 'drone ', 'videogame', 'console',
-            'xbox', 'playstation', 'smartwatch', 'roteador', 'switch ',
-            'mouse', 'teclado', 'webcam', 'ssd ', 'hd externo', 'pendrive'
-        ]
-        if any(kw in text for kw in tech_kw):
-            return 'tecnologia'
-        
-        # 5️⃣ ELETRODOMÉSTICOS
-        eletro_kw = [
-            'geladeira', 'refrigerador', 'fogao ', 'microondas', 'micro-ondas',
-            'lavadora', 'secadora', 'lava e seca', 'ar condicionado',
-            'ventilador', 'purificador', ' tv ', 'televisao', 'smart tv',
-            'air fryer', 'fritadeira eletrica', 'aspirador', 'cafeteira',
-            'liquidificador', 'batedeira', 'ferro de passar'
-        ]
-        if any(kw in text for kw in eletro_kw):
-            # Valida que NÃO é industrial
-            if not any(x in text for x in ['industrial', '6 bocas', 'profissional', 'inox']):
-                return 'eletrodomesticos'
-        
-        # 6️⃣ MÓVEIS E DECORAÇÃO
-        moveis_kw = [
-            'sofa', 'mesa ', 'cadeira', 'poltrona', 'armario', 'guarda-roupa',
-            'cama ', 'colchao', 'estante', 'rack ', 'criado-mudo', 'comoda',
-            'aparador', 'buffet', 'escrivaninha', 'puff', 'banqueta',
-            'lustres', 'luminaria', 'quadro decoracao', 'espelho', 'tapete',
-            'cortina', 'persiana', 'carpete'
-        ]
-        if any(kw in text for kw in moveis_kw):
-            return 'moveis_decoracao'
-        
-        # 7️⃣ CASA UTILIDADES
-        utilidades_kw = [
-            'panela', 'frigideira', 'assadeira', 'prato', 'tigela', 'bowl',
-            'talher', 'garfo', 'faca ', 'colher', 'copo ', 'xicara', 'caneca',
-            'jarra', 'marmita', 'pote ', 'organizador domestico', 'cesto',
-            'vassoura', 'rodo', 'balde', 'varal', 'tabua de corte',
-            'kit churrasco'
-        ]
-        if any(kw in text for kw in utilidades_kw):
-            return 'casa_utilidades'
-        
-        # 8️⃣ BENS DE CONSUMO
-        consumo_kw = [
-            'roupa', 'calcado', 'sapato', 'tenis', 'bolsa', 'mochila',
-            'carteira', 'oculos', 'relogio', 'joia', 'colar', 'anel',
-            'brinco', 'pulseira', 'perfume', 'cosmetico', 'maquiagem',
-            'mala ', 'valise', 'bone ', 'chapeu', 'cachecol', 'cinto'
-        ]
-        if any(kw in text for kw in consumo_kw):
-            return 'bens_consumo'
-        
-        # 9️⃣ ALIMENTOS E BEBIDAS
-        alimentos_kw = [
-            'vinho', 'whisky', 'cerveja', 'cafe ', 'cha ', 'suco ',
-            'refrigerante', 'agua mineral', 'suplemento alimentar',
-            'proteina', 'whey', 'barra de cereal', 'chocolate'
-        ]
-        if any(kw in text for kw in alimentos_kw):
-            return 'alimentos_bebidas'
-        
-        # 🔟 MATERIAIS DE CONSTRUÇÃO
-        construcao_kw = [
-            'cimento', 'tijolo', 'bloco', 'telha', 'piso ', 'porcelanato',
-            'ceramica', 'azulejo', 'revestimento', 'porta ', 'janela',
-            'fechadura', 'tinta ', 'verniz', 'tubo ', 'cano ', 'torneira',
-            'registro', 'madeira', 'tabua ', 'viga', 'areia ', 'brita',
-            'vergalhao', 'ferro ', 'aco ',
-            # Ferramentas de construção
-            'cortadeira de piso', 'serra marmore', 'disco de corte',
-            'furadeira', 'parafusadeira', 'nivel', 'prumo'
-        ]
-        if any(kw in text for kw in construcao_kw):
-            return 'materiais_construcao'
-        
-        # 1️⃣1️⃣ INDUSTRIAL EQUIPAMENTOS
-        industrial_kw = [
-            'torno', 'fresadora', 'prensa', 'compressor industrial',
-            'gerador', 'transformador', 'motor industrial',
-            'bomba industrial', 'maquina cnc', 'serra industrial',
-            'furadeira industrial', 'lixadeira industrial',
-            'esmerilhadeira', 'injetora', 'extrusora', 'caldeira',
-            'forno industrial', 'equipamento de producao', 'linha de producao',
-            'esteira transportadora', 'compactador', 'compactador de lixo',
-            'coletor de lixo', 'caminhao compactador'
-        ]
-        if any(kw in text for kw in industrial_kw):
-            return 'industrial_equipamentos'
-        
-        # 1️⃣2️⃣ MÁQUINAS PESADAS E AGRÍCOLAS
-        maquinas_kw = [
-            'retroescavadeira', 'escavadeira', 'pa carregadeira',
-            'motoniveladora', 'rolo compactador', 'patrol',
-            'trator agricola', 'colheitadeira', 'plantadeira',
-            'pulverizador', 'grade agricola', 'arado', 'semeadeira',
-            'rocadeira', 'empilhadeira', 'bobcat', 'minicarregadeira',
-            'terraplenagem'
-        ]
-        if any(kw in text for kw in maquinas_kw):
-            return 'maquinas_pesadas_agricolas'
-        
-        # 1️⃣3️⃣ PARTES E PEÇAS
-        pecas_kw = [
-            'peca ', 'pecas ', 'componente', 'reposicao', 'sobressalente',
-            'motor (peca)', 'engrenagem', 'rolamento', 'correia',
-            'filtro ', 'vela ', 'bateria (peca)', 'alternador',
-            'radiador', 'pneu', 'aro ', 'disco de freio', 'pastilha',
-            'amortecedor', 'suspensao', 'cambio (peca)', 'embreagem'
-        ]
-        if any(kw in text for kw in pecas_kw):
-            return 'partes_pecas'
-        
-        # 1️⃣4️⃣ ANIMAIS
-        animais_kw = [
-            'gado', ' boi ', ' vaca ', 'novilho', 'touro', 'cavalo',
-            'egua', 'potro', 'jumento', 'porco', 'suino', 'galinha',
-            'frango', 'pato', 'ovelha', 'carneiro', 'cabra', 'caprino',
-            'ovino', 'ave ', 'animal vivo', 'plantel'
-        ]
-        if any(kw in text for kw in animais_kw):
-            return 'animais'
-        
-        # 1️⃣5️⃣ SUCATAS E RESÍDUOS
-        sucatas_kw = [
-            'sucata', 'residuo', 'reciclavel', 'descarte', 'ferro velho',
-            'metal sucata', 'aluminio sucata', 'cobre sucata', 'lata',
-            'papelao', 'plastico sucata', 'eletronica sucata',
-            'bateria usada', 'aparas', 'refugo', 'resto', 'sobra'
-        ]
-        if any(kw in text for kw in sucatas_kw):
-            return 'sucatas_residuos'
-        
-        # 1️⃣6️⃣ ARTES E COLECIONISMO
-        artes_kw = [
-            'quadro arte', 'pintura', 'escultura', 'estatua',
-            'obra de arte', 'antiguidade', 'moeda antiga', 'selo',
-            'colecao', 'colecionavel', 'raridade', 'vintage',
-            'retro', 'reliquia', 'porcelana antiga', 'cristal antigo'
-        ]
-        if any(kw in text for kw in artes_kw):
-            return 'artes_colecionismo'
-        
-        # Não conseguiu classificar com keywords → Groq decide
-        return None
+        # Tabelas válidas (17 categorias)
+        self.valid_tables = {
+            'tecnologia', 'veiculos', 'eletrodomesticos', 'bens_consumo',
+            'moveis_decoracao', 'casa_utilidades', 'alimentos_bebidas',
+            'artes_colecionismo', 'imoveis', 'materiais_construcao',
+            'industrial_equipamentos', 'maquinas_pesadas_agricolas',
+            'nichados', 'partes_pecas', 'animais', 'sucatas_residuos', 'diversos'
+        }
     
     def classify(self, item: Dict) -> Optional[str]:
         """
-        FLUXO PRINCIPAL DE CLASSIFICAÇÃO:
+        Classifica item usando 100% Groq AI.
         
-        1. Bloqueia financeiros/abstratos → diversos (1-2%)
-        2. Detecta mistos óbvios → diversos (0-1%)
-        3. Pré-classificador (keywords) → categoria específica (70-80%)
-        4. Groq AI (casos complexos) → categoria específica (15-25%)
-        5. Fallback conservador → diversos (apenas impossíveis)
+        Args:
+            item: Dict com 'normalized_title' e opcionalmente 'description'
+        
+        Returns:
+            Nome da tabela ou None se falhar
         """
         title = item.get('normalized_title', '').strip()
-        description = item.get('description', '')[:500]
+        description = item.get('description', '')[:800]  # Mais contexto
         
         if not title:
             self.stats['failed'] += 1
             self.stats['total'] += 1
             return None
         
-        # 1️⃣ BLOQUEIA FINANCEIROS/ABSTRATOS
-        if self._is_financial_abstract(item):
-            self.stats['financial_blocked'] += 1
-            self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
-            self.stats['total'] += 1
-            
-            if self.stats['financial_blocked'] <= 3:
-                print(f"  💼 DIVERSOS (financeiro): '{title[:60]}'")
-            
-            return 'diversos'
-        
-        # 2️⃣ DETECTA MISTOS EXPLÍCITOS
-        if self._is_obvious_mixed_lot(item):
-            self.stats['mixed_detected'] += 1
-            self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
-            self.stats['total'] += 1
-            
-            if self.stats['mixed_detected'] <= 3:
-                print(f"  🎨 DIVERSOS (misto): '{title[:60]}'")
-            
-            return 'diversos'
-        
-        # 3️⃣ PRÉ-CLASSIFICADOR (keywords fortes - rápido)
-        obvious_category = self._try_obvious_classification(title, description)
-        if obvious_category:
-            self.stats['pre_classified'] += 1
-            self.stats['by_table'][obvious_category] = self.stats['by_table'].get(obvious_category, 0) + 1
-            self.stats['total'] += 1
-            
-            # Log apenas primeiros 5 de cada categoria
-            category_count = self.stats['by_table'][obvious_category]
-            if category_count <= 5:
-                print(f"  🎯 {obvious_category}: '{title[:55]}'")
-            
-            return obvious_category
-        
-        # 4️⃣ GROQ AI (casos complexos)
+        # Chama Groq AI
         table_name = self._classify_with_groq(title, description)
         
-        if table_name:
-            self.stats['groq_classifications'] += 1
+        if table_name and table_name in self.valid_tables:
+            self.stats['successful'] += 1
             self.stats['by_table'][table_name] = self.stats['by_table'].get(table_name, 0) + 1
             self.stats['total'] += 1
             
-            if self.stats['groq_classifications'] <= 10:
-                print(f"  🤖 {table_name}: '{title[:55]}'")
+            # Log progressivo
+            if self.stats['total'] <= 20 or self.stats['total'] % 100 == 0:
+                print(f"  🤖 [{self.stats['total']:>4}] {table_name:.<30} '{title[:45]}'")
             
             return table_name
         
-        # 5️⃣ FALLBACK (último recurso)
+        # Fallback
         self.stats['failed'] += 1
         self.stats['by_table']['diversos'] = self.stats['by_table'].get('diversos', 0) + 1
         self.stats['total'] += 1
         
-        if self.stats['failed'] <= 3:
-            print(f"  ⚠️ FALLBACK diversos: '{title[:55]}'")
+        if self.stats['failed'] <= 5:
+            print(f"  ⚠️  FALLBACK diversos: '{title[:50]}'")
         
         return 'diversos'
     
     def _classify_with_groq(self, title: str, description: str) -> Optional[str]:
-        """Classifica com Groq AI + validação forte"""
-        prompt = self._build_smart_prompt(title, description)
+        """
+        Classifica usando Groq AI com prompt otimizado para Llama 3.3 70B.
+        
+        Best practices aplicadas:
+        - Temperature 0.2 (balanceado para classificação)
+        - Sistema de instruções claro
+        - Few-shot examples
+        - Contexto estruturado
+        """
+        prompt = self._build_optimized_prompt(title, description)
         
         try:
             response = self._call_groq(prompt)
@@ -380,117 +107,158 @@ class GroqTableClassifier:
             if not response:
                 return None
             
-            # Limpa resposta
-            response_clean = response.strip().lower()
-            response_clean = response_clean.replace('\n', ' ').replace(',', '').replace(';', '').replace('.', '')
-            response_clean = response_clean.split()[0] if response_clean else ''
-            
-            # Validação 1: categoria exata
-            if response_clean in TABLES_INFO:
-                return response_clean
-            
-            # Validação 2: mapeamento de variações
-            mappings = {
-                # Imóveis
-                'imovel': 'imoveis', 'propriedade': 'imoveis',
-                'casa': 'imoveis', 'apartamento': 'imoveis',
-                # Veículos
-                'veiculo': 'veiculos', 'carro': 'veiculos', 'moto': 'veiculos',
-                # Tech & Eletro
-                'tecnologias': 'tecnologia', 'tech': 'tecnologia',
-                'eletrodomestico': 'eletrodomesticos', 'eletro': 'eletrodomesticos',
-                # Casa
-                'movel': 'moveis_decoracao', 'moveis': 'moveis_decoracao',
-                'utilidades': 'casa_utilidades', 'utilidade': 'casa_utilidades',
-                # Consumo
-                'consumo': 'bens_consumo', 'bens': 'bens_consumo',
-                'alimento': 'alimentos_bebidas', 'bebida': 'alimentos_bebidas',
-                # Construção & Industrial
-                'construcao': 'materiais_construcao', 'material': 'materiais_construcao',
-                'industrial': 'industrial_equipamentos', 'equipamento': 'industrial_equipamentos',
-                'maquina': 'maquinas_pesadas_agricolas', 'maquinas': 'maquinas_pesadas_agricolas',
-                'agricola': 'maquinas_pesadas_agricolas', 'agricolas': 'maquinas_pesadas_agricolas',
-                # Outros
-                'nichado': 'nichados', 'peca': 'partes_pecas', 'pecas': 'partes_pecas',
-                'animal': 'animais', 'sucata': 'sucatas_residuos',
-                'arte': 'artes_colecionismo', 'colecionismo': 'artes_colecionismo',
-            }
-            
-            if response_clean in mappings:
-                return mappings[response_clean]
-            
-            return None
+            # Limpa e valida resposta
+            category = self._extract_category(response)
+            return category if category in self.valid_tables else None
         
         except Exception as e:
-            print(f"⚠️ Erro Groq: {e}")
+            if self.stats['failed'] <= 3:
+                print(f"⚠️ Erro Groq: {e}")
             return None
     
-    def _build_smart_prompt(self, title: str, description: str) -> str:
-        """Prompt DIRETO cobrindo TODAS as 17 categorias"""
+    def _build_optimized_prompt(self, title: str, description: str) -> str:
+        """
+        Prompt otimizado para Llama 3.3 70B com few-shot examples.
+        Foca em raciocínio contextual e função do item.
+        """
         
-        prompt = f"""Você é um classificador de leilões. Classifique este item na categoria MAIS ESPECÍFICA.
+        prompt = f"""Você é um classificador especialista de itens de leilão. Analise o contexto, função e características do item para determinar a categoria MAIS ESPECÍFICA possível.
 
-ITEM:
+📦 ITEM PARA CLASSIFICAR:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Título: {title}
-Descrição: {description[:300] if description else 'N/A'}
+Descrição: {description if description else 'N/A'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-================================================================================
-CATEGORIAS (17 opções)
-================================================================================
+📋 CATEGORIAS DISPONÍVEIS (17 opções):
 
-🏠 GRANDES ATIVOS:
-  • imoveis → casa, apartamento, terreno, lote, sala, galpão, fazenda
-  • veiculos → carro, moto, caminhão, ônibus, barco, avião, bicicleta
+🏠 GRANDES ATIVOS
+├─ imoveis → propriedades físicas (casa, apartamento, terreno, lote, sala comercial, galpão, fazenda)
+└─ veiculos → meios de transporte (carro, moto, caminhão, ônibus, barco, avião, bicicleta)
 
-💻 TECNOLOGIA & ELETRO:
-  • tecnologia → notebook, celular, impressora, tablet, câmera, drone, servidor
-  • eletrodomesticos → geladeira, fogão, microondas, TV, ar condicionado, lavadora
+💻 TECNOLOGIA & ELETRÔNICOS
+├─ tecnologia → informática e comunicação (notebook, celular, tablet, impressora, câmera, drone, servidor)
+└─ eletrodomesticos → linha branca e entretenimento doméstico (geladeira, fogão, TV, ar condicionado, microondas)
 
-🛋️ CASA & DECORAÇÃO:
-  • moveis_decoracao → sofá, mesa, cadeira, armário, cama, estante
-  • casa_utilidades → panela, prato, copo, talher, organizador, vassoura
-  • artes_colecionismo → quadros, esculturas, antiguidades, obras de arte
+🛋️ CASA & DECORAÇÃO
+├─ moveis_decoracao → mobília e decoração (sofá, mesa, cadeira, armário, cama, estante, lustre, quadros)
+├─ casa_utilidades → utensílios domésticos (panela, prato, copo, talher, organizador, vassoura)
+└─ artes_colecionismo → obras de arte, antiguidades, colecionáveis raros
 
-🍔 CONSUMO:
-  • bens_consumo → roupas, calçados, bolsas, óculos, relógios, joias, perfumes
-  • alimentos_bebidas → vinho, café, suplementos
+🛍️ CONSUMO
+├─ bens_consumo → itens pessoais (roupas, calçados, bolsas, óculos, relógios, joias, perfumes)
+└─ alimentos_bebidas → produtos alimentícios e bebidas (vinho, café, suplementos)
 
-🏗️ CONSTRUÇÃO & INDUSTRIAL:
-  • materiais_construcao → cimento, tijolo, piso, tinta, ferramentas de construção
-  • industrial_equipamentos → torno, prensa, compressor, gerador, compactador de lixo
-  • maquinas_pesadas_agricolas → trator, escavadeira, colheitadeira, retroescavadeira
+🏗️ CONSTRUÇÃO & INDUSTRIAL
+├─ materiais_construcao → insumos de obra (cimento, tijolo, piso, tinta, ferramentas de construção)
+├─ industrial_equipamentos → maquinário industrial (torno, prensa, compressor, gerador, compactador)
+└─ maquinas_pesadas_agricolas → equipamentos pesados (trator, escavadeira, colheitadeira, retroescavadeira)
 
-🏥 ESPECIALIDADES:
-  • nichados → equipamentos médicos, odontológicos, farmácia, veterinário, cozinha industrial
+🏥 ESPECIALIDADES
+└─ nichados → equipamentos profissionais especializados (médico, odontológico, farmácia, veterinário, cozinha industrial, estética profissional)
 
-🔧 OUTROS:
-  • partes_pecas → peças avulsas, componentes, reposição
-  • animais → gado, cavalos, aves vivas
-  • sucatas_residuos → sucata, reciclável, descarte
+🔧 OUTROS
+├─ partes_pecas → componentes avulsos, peças de reposição, sobressalentes
+├─ animais → animais vivos (gado, cavalos, aves)
+└─ sucatas_residuos → materiais para reciclagem, sucata, descarte
 
-🎨 DIVERSOS:
-  • diversos → APENAS: itens abstratos (ações, créditos, marcas) OU lotes mistos explícitos
+🎨 CATCH-ALL
+└─ diversos → APENAS para: (1) itens abstratos (ações, créditos, marcas, direitos, patentes) OU (2) lotes explicitamente mistos com múltiplas categorias muito diferentes
 
-================================================================================
-REGRAS (SIGA ESTA ORDEM)
-================================================================================
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📖 EXEMPLOS DE CLASSIFICAÇÃO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. IMÓVEIS: qualquer propriedade → "imoveis"
-2. VEÍCULOS: qualquer transporte → "veiculos" (exceto peças → "partes_pecas")
-3. NICHADOS: equipamento profissional (farmácia, hospital, dentista, cozinha industrial) → "nichados"
-4. MÁQUINAS: equipamento industrial/agrícola → "industrial_equipamentos" ou "maquinas_pesadas_agricolas"
-5. MÓVEIS: você SENTA/GUARDA/DECORA → "moveis_decoracao"
-6. UTILIDADES: você USA para cozinhar/comer/limpar → "casa_utilidades"
-7. TECH: informática, comunicação → "tecnologia"
-8. ELETRO: linha branca, TV → "eletrodomesticos"
-9. DIVERSOS: APENAS se abstrato ou lote misto explícito
+EXEMPLO 1:
+Título: "Apartamento 53 m² com 1 vaga - Parque das Nações"
+→ Categoria: imoveis
+Raciocínio: Propriedade imobiliária residencial
 
-RESPONDA APENAS A CATEGORIA (ex: "imoveis", "veiculos", "tecnologia"):"""
+EXEMPLO 2:
+Título: "Carro Volkswagen Gol 1.0 2015"
+→ Categoria: veiculos
+Raciocínio: Veículo automotor completo
+
+EXEMPLO 3:
+Título: "Fogão Industrial 6 Bocas em Inox - Metalúrgica"
+→ Categoria: nichados
+Raciocínio: Equipamento de cozinha profissional/industrial, não doméstico
+
+EXEMPLO 4:
+Título: "Notebook Dell i5 8GB RAM"
+→ Categoria: tecnologia
+Raciocínio: Equipamento de informática
+
+EXEMPLO 5:
+Título: "Sofá 3 Lugares + Poltrona Estofada"
+→ Categoria: moveis_decoracao
+Raciocínio: Mobília residencial
+
+EXEMPLO 6:
+Título: "Conjunto de Panelas 10 Peças Tramontina"
+→ Categoria: casa_utilidades
+Raciocínio: Utensílios de cozinha doméstica
+
+EXEMPLO 7:
+Título: "Trator Agrícola John Deere 75HP"
+→ Categoria: maquinas_pesadas_agricolas
+Raciocínio: Maquinário agrícola pesado
+
+EXEMPLO 8:
+Título: "Compressor de Ar Industrial 20HP"
+→ Categoria: industrial_equipamentos
+Raciocínio: Equipamento industrial de produção
+
+EXEMPLO 9:
+Título: "Cadeira Odontológica Kavo + Equipo Completo"
+→ Categoria: nichados
+Raciocínio: Equipamento odontológico profissional
+
+EXEMPLO 10:
+Título: "Motor de Arranque para VW Gol (peça)"
+→ Categoria: partes_pecas
+Raciocínio: Componente avulso de reposição
+
+EXEMPLO 11:
+Título: "10 Cabeças de Gado Nelore"
+→ Categoria: animais
+Raciocínio: Animais vivos
+
+EXEMPLO 12:
+Título: "Lote: TV, Geladeira, Micro-ondas, Sofá, Mesa"
+→ Categoria: diversos
+Raciocínio: Lote misto com categorias muito diferentes (tecnologia + eletrodomésticos + móveis)
+
+EXEMPLO 13:
+Título: "1.000 ações preferenciais Petrobras"
+→ Categoria: diversos
+Raciocínio: Ativo financeiro abstrato
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 INSTRUÇÕES DE CLASSIFICAÇÃO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ANALISE O CONTEXTO: Qual é a FUNÇÃO PRINCIPAL e USO REAL do item?
+2. PRIORIZE A ESPECIFICIDADE: Escolha a categoria MAIS ESPECÍFICA possível
+3. CONSIDERE O USO:
+   • Doméstico vs Profissional/Industrial (ex: fogão comum → eletrodomesticos; fogão industrial → nichados)
+   • Completo vs Peça (ex: carro completo → veiculos; motor avulso → partes_pecas)
+   • Novo/Usado vs Sucata (ex: geladeira funcionando → eletrodomesticos; geladeira p/ reciclagem → sucatas_residuos)
+4. EVITE "diversos": Use APENAS para itens abstratos ou lotes explicitamente mistos
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RESPONDA APENAS COM O NOME DA CATEGORIA (uma palavra, letras minúsculas, sem acentos).
+Exemplo de resposta válida: "tecnologia" ou "veiculos" ou "imoveis"
+
+CATEGORIA:"""
         
         return prompt
     
     def _call_groq(self, prompt: str) -> Optional[str]:
-        """Chama API Groq"""
+        """
+        Chama API Groq com parâmetros otimizados para Llama 3.3 70B.
+        """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -501,16 +269,16 @@ RESPONDA APENAS A CATEGORIA (ex: "imoveis", "veiculos", "tecnologia"):"""
             "messages": [
                 {
                     "role": "system",
-                    "content": "Você é um classificador EXPERT em leilões. Analise o CONTEXTO e a FUNÇÃO REAL do item. Responda APENAS o nome da categoria."
+                    "content": "Você é um classificador especialista que analisa o CONTEXTO e a FUNÇÃO REAL dos itens. Responde apenas com o nome exato da categoria, sem explicações adicionais."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            "temperature": 0.05,
-            "max_tokens": 50,
-            "top_p": 0.85
+            "temperature": 0.2,      # Balanceado: consistente mas não robótico
+            "max_tokens": 150,        # Suficiente para resposta + raciocínio breve
+            "top_p": 0.9              # Padrão Groq otimizado
         }
         
         try:
@@ -520,95 +288,249 @@ RESPONDA APENAS A CATEGORIA (ex: "imoveis", "veiculos", "tecnologia"):"""
                 data = response.json()
                 if data.get('choices') and len(data['choices']) > 0:
                     return data['choices'][0]['message']['content'].strip()
+            else:
+                if self.stats['failed'] <= 3:
+                    print(f"⚠️ Status {response.status_code}: {response.text[:100]}")
             
             return None
         
         except Exception as e:
-            print(f"⚠️ Erro Groq: {e}")
+            if self.stats['failed'] <= 3:
+                print(f"⚠️ Erro na chamada Groq: {e}")
             return None
     
+    def _extract_category(self, response: str) -> Optional[str]:
+        """
+        Extrai e normaliza categoria da resposta do Groq.
+        Busca por nome exato de categoria ou variações comuns.
+        """
+        # Limpa resposta
+        response_clean = response.strip().lower()
+        
+        # Remove pontuação comum
+        for char in [',', '.', ';', ':', '\n', '"', "'", '`']:
+            response_clean = response_clean.replace(char, ' ')
+        
+        # Pega primeira palavra (geralmente é a categoria)
+        words = response_clean.split()
+        if not words:
+            return None
+        
+        first_word = words[0]
+        
+        # Valida categoria exata
+        if first_word in self.valid_tables:
+            return first_word
+        
+        # Mapeia variações comuns → categoria oficial
+        variations = {
+            # Imóveis
+            'imovel': 'imoveis',
+            'propriedade': 'imoveis',
+            'imovel': 'imoveis',
+            
+            # Veículos
+            'veiculo': 'veiculos',
+            'veiculo': 'veiculos',
+            
+            # Tecnologia
+            'tech': 'tecnologia',
+            'tecnologias': 'tecnologia',
+            
+            # Eletrodomésticos
+            'eletrodomestico': 'eletrodomesticos',
+            'eletro': 'eletrodomesticos',
+            
+            # Móveis
+            'movel': 'moveis_decoracao',
+            'moveis': 'moveis_decoracao',
+            'decoracao': 'moveis_decoracao',
+            
+            # Utilidades
+            'utilidades': 'casa_utilidades',
+            'utilidade': 'casa_utilidades',
+            
+            # Consumo
+            'consumo': 'bens_consumo',
+            'bens': 'bens_consumo',
+            
+            # Alimentos
+            'alimento': 'alimentos_bebidas',
+            'alimentos': 'alimentos_bebidas',
+            'bebida': 'alimentos_bebidas',
+            'bebidas': 'alimentos_bebidas',
+            
+            # Artes
+            'arte': 'artes_colecionismo',
+            'artes': 'artes_colecionismo',
+            'colecionismo': 'artes_colecionismo',
+            
+            # Construção
+            'construcao': 'materiais_construcao',
+            'material': 'materiais_construcao',
+            'materiais': 'materiais_construcao',
+            
+            # Industrial
+            'industrial': 'industrial_equipamentos',
+            'equipamento': 'industrial_equipamentos',
+            'equipamentos': 'industrial_equipamentos',
+            
+            # Máquinas
+            'maquina': 'maquinas_pesadas_agricolas',
+            'maquinas': 'maquinas_pesadas_agricolas',
+            'agricola': 'maquinas_pesadas_agricolas',
+            'agricolas': 'maquinas_pesadas_agricolas',
+            'pesada': 'maquinas_pesadas_agricolas',
+            'pesadas': 'maquinas_pesadas_agricolas',
+            
+            # Nichados
+            'nichado': 'nichados',
+            
+            # Peças
+            'peca': 'partes_pecas',
+            'pecas': 'partes_pecas',
+            'parte': 'partes_pecas',
+            'partes': 'partes_pecas',
+            
+            # Animais
+            'animal': 'animais',
+            
+            # Sucatas
+            'sucata': 'sucatas_residuos',
+            'sucatas': 'sucatas_residuos',
+            'residuo': 'sucatas_residuos',
+            'residuos': 'sucatas_residuos',
+        }
+        
+        return variations.get(first_word)
+    
     def get_stats(self) -> Dict:
-        """Retorna estatísticas"""
+        """Retorna estatísticas de classificação"""
         return self.stats.copy()
     
     def print_stats(self):
-        """Imprime estatísticas detalhadas"""
+        """Imprime relatório detalhado de classificação"""
         print("\n" + "="*80)
-        print("📊 ESTATÍSTICAS DE CLASSIFICAÇÃO v2.0")
+        print("📊 ESTATÍSTICAS - GROQ CLASSIFIER v3.0 (100% AI)")
         print("="*80)
-        print(f"Total processado: {self.stats['total']}")
-        print()
-        print("📍 MÉTODOS DE CLASSIFICAÇÃO:")
-        print(f"  🎯 Pré-classificador (keywords): {self.stats['pre_classified']} ({self.stats['pre_classified']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"  🤖 Groq AI (casos complexos):   {self.stats['groq_classifications']} ({self.stats['groq_classifications']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"  💼 Financeiros bloqueados:      {self.stats['financial_blocked']} ({self.stats['financial_blocked']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"  🎨 Mistos detectados:           {self.stats['mixed_detected']} ({self.stats['mixed_detected']/max(self.stats['total'],1)*100:.1f}%)")
-        print(f"  ⚠️  Fallback (diversos):         {self.stats['failed']} ({self.stats['failed']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Total processado:      {self.stats['total']}")
+        print(f"Classificados com sucesso: {self.stats['successful']} ({self.stats['successful']/max(self.stats['total'],1)*100:.1f}%)")
+        print(f"Fallback (diversos):   {self.stats['failed']} ({self.stats['failed']/max(self.stats['total'],1)*100:.1f}%)")
         
         if self.stats['by_table']:
-            print(f"\n📦 DISTRIBUIÇÃO POR TABELA:")
+            print(f"\n📦 DISTRIBUIÇÃO POR CATEGORIA:")
             print("-" * 80)
             
-            for table, count in sorted(self.stats['by_table'].items(), key=lambda x: x[1], reverse=True):
+            # Ordena por quantidade
+            sorted_tables = sorted(
+                self.stats['by_table'].items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            
+            for table, count in sorted_tables:
                 pct = count / self.stats['total'] * 100
-                bar = "█" * int(pct / 2)
+                bar = "█" * min(int(pct / 2), 40)
                 emoji = "🎨" if table == 'diversos' else "  "
-                print(f"{emoji} {table:.<35} {count:>6} ({pct:>5.1f}%) {bar}")
+                print(f"{emoji} {table:.<30} {count:>6} ({pct:>5.1f}%) {bar}")
         
         print("="*80)
         
-        # Análise de eficiência
-        pre_pct = self.stats['pre_classified']/max(self.stats['total'],1)*100
-        groq_pct = self.stats['groq_classifications']/max(self.stats['total'],1)*100
-        diversos_pct = self.stats['by_table'].get('diversos', 0)/max(self.stats['total'],1)*100
+        # Análise de qualidade
+        diversos_pct = self.stats['by_table'].get('diversos', 0) / max(self.stats['total'], 1) * 100
+        success_pct = self.stats['successful'] / max(self.stats['total'], 1) * 100
         
-        print(f"\n💡 ANÁLISE DE EFICIÊNCIA:")
-        print(f"   • Pré-classificador: {pre_pct:.1f}% (ótimo se >70%)")
-        print(f"   • Groq AI: {groq_pct:.1f}% (ideal entre 15-30%)")
-        print(f"   • Diversos: {diversos_pct:.1f}% (ótimo se <5%)")
+        print(f"\n💡 ANÁLISE DE QUALIDADE:")
+        print(f"   • Taxa de sucesso: {success_pct:.1f}% (ótimo se >95%)")
+        print(f"   • Taxa 'diversos': {diversos_pct:.1f}% (ideal <5%)")
         
         if diversos_pct > 10:
-            print(f"   ⚠️  ATENÇÃO: 'diversos' muito alto ({diversos_pct:.1f}%)!")
-            print(f"      → Adicione keywords no pré-classificador")
+            print(f"   ⚠️  ATENÇÃO: 'diversos' muito alto ({diversos_pct:.1f}%)")
+            print(f"      → Verifique prompt e parâmetros do Groq")
         elif diversos_pct < 5:
-            print(f"   ✅ Excelente! 'diversos' está controlado ({diversos_pct:.1f}%)")
+            print(f"   ✅ Excelente! Taxa 'diversos' controlada ({diversos_pct:.1f}%)")
+        
+        if success_pct > 95:
+            print(f"   ✅ Ótima taxa de classificação! ({success_pct:.1f}%)")
+        else:
+            print(f"   ⚠️  Taxa de sucesso pode melhorar ({success_pct:.1f}%)")
 
 
 def classify_item_to_table(item: Dict) -> str:
-    """Função auxiliar: classifica um item"""
+    """
+    Função auxiliar: classifica um único item.
+    
+    Args:
+        item: Dict com 'normalized_title' e opcionalmente 'description'
+    
+    Returns:
+        Nome da tabela (string)
+    """
     classifier = GroqTableClassifier()
     return classifier.classify(item) or 'diversos'
 
 
 if __name__ == "__main__":
-    # TESTES
-    print("\n🧪 TESTE - CLASSIFICADOR v2.0 COMPLETO\n")
+    # TESTE DO CLASSIFICADOR
+    print("\n🧪 TESTE - GROQ CLASSIFIER v3.0 (100% AI)")
     print("="*80)
-    print("Pré-classificador + Groq AI = 100% cobertura (17 categorias)")
+    print("Zero keywords, full contextual intelligence")
+    print("Llama 3.3 70B Versatile - Temperature 0.2")
     print("="*80 + "\n")
     
     classifier = GroqTableClassifier()
     
     test_items = [
-        # IMÓVEIS
-        {"normalized_title": "apartamento 53 m2 01 vaga parque das nacoes", "description": ""},
-        {"normalized_title": "casa 131 m2 novo jardim patente sao paulo", "description": ""},
-        {"normalized_title": "terreno 300 m2 zona sul", "description": ""},
+        # Imóveis
+        {"normalized_title": "Apartamento 53 m² com 1 vaga - Parque das Nações", "description": "Imóvel residencial com sala, cozinha, 2 quartos"},
+        {"normalized_title": "Casa 131 m² - Novo Jardim Patente - São Paulo", "description": ""},
+        {"normalized_title": "Terreno urbano 300 m² - Zona Sul", "description": ""},
         
-        # VEÍCULOS
-        {"normalized_title": "carro volkswagen gol 2015", "description": ""},
-        {"normalized_title": "moto honda cg 150", "description": ""},
-        {"normalized_title": "caminhao mercedes 710", "description": ""},
+        # Veículos
+        {"normalized_title": "Carro Volkswagen Gol 1.0 2015", "description": ""},
+        {"normalized_title": "Moto Honda CG 150 Titan 2020", "description": ""},
         
-        # DIVERSOS (financeiros)
-        {"normalized_title": "5948 acoes preferenciais classe b elet6", "description": ""},
-        {"normalized_title": "marca registrada no inpi", "description": ""},
+        # Tecnologia
+        {"normalized_title": "Notebook Dell Inspiron i5 8GB RAM", "description": ""},
+        {"normalized_title": "iPhone 12 Pro 128GB", "description": ""},
+        
+        # Eletrodomésticos
+        {"normalized_title": "Geladeira Brastemp Frost Free 400L", "description": ""},
+        {"normalized_title": "Smart TV Samsung 55 polegadas 4K", "description": ""},
+        
+        # Móveis
+        {"normalized_title": "Sofá 3 lugares + Poltrona estofada", "description": ""},
+        
+        # Nichados (profissional)
+        {"normalized_title": "Fogão Industrial 6 bocas em Inox", "description": "Equipamento profissional para cozinha industrial"},
+        {"normalized_title": "Cadeira Odontológica Kavo + Equipo Completo", "description": ""},
+        
+        # Máquinas Pesadas
+        {"normalized_title": "Trator Agrícola John Deere 75HP", "description": ""},
+        {"normalized_title": "Retroescavadeira Caterpillar 416F", "description": ""},
+        
+        # Industrial
+        {"normalized_title": "Compressor de Ar Industrial 20HP", "description": ""},
+        
+        # Peças
+        {"normalized_title": "Motor de Arranque para VW Gol (peça)", "description": ""},
+        
+        # Animais
+        {"normalized_title": "10 cabeças de Gado Nelore", "description": ""},
+        
+        # Diversos (financeiros)
+        {"normalized_title": "1.000 ações preferenciais Petrobras PETR4", "description": ""},
+        {"normalized_title": "Marca registrada no INPI - Setor Alimentício", "description": ""},
+        
+        # Diversos (mistos)
+        {"normalized_title": "Lote: TV 32', Geladeira, Micro-ondas, Sofá e Mesa", "description": ""},
     ]
     
     print("🔍 CLASSIFICANDO ITENS DE TESTE...\n")
     
     for i, item in enumerate(test_items, 1):
         table = classifier.classify(item)
-        print(f"{i}. '{item['normalized_title'][:50]}' → {table}")
+        title_short = item['normalized_title'][:50]
+        print(f"{i:>2}. {table:.<30} '{title_short}'")
     
     classifier.print_stats()
