@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MEGALEILÕES - SCRAPER COMPLETO DO DOMÍNIO
-Varre TODO o site MegaLeilões (imóveis, veículos, bens, industrial, animais, outros)
-Scrape → Normalize → Classify → Insert
+MEGALEILÕES - SCRAPER SIMPLIFICADO
+Mapeamento direto: URL do site → Tabela do banco
+Sem IA, sem keywords, apenas categorias oficiais do MegaLeilões
 """
 
 import sys
@@ -14,13 +14,12 @@ import re
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 # Adiciona pasta scrapers/ ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from supabase_client import SupabaseClient
-from groq_classifier import GroqTableClassifier
 from normalizer import normalize_items
 
 # Imports do scraper
@@ -29,45 +28,78 @@ from bs4 import BeautifulSoup
 
 
 class MegaLeiloesScraper:
-    """Scraper completo do domínio MegaLeilões"""
+    """Scraper com mapeamento direto de categorias do site"""
     
     def __init__(self):
         self.source = 'megaleiloes'
         self.base_url = 'https://www.megaleiloes.com.br'
         
-        # Seções principais do site
-        # Para veículos: subcategorias específicas com vehicle_type
-        # Para outras: categoria principal
-        self.main_sections = [
-            # VEÍCULOS (6 subcategorias - COMPLETO!)
-            ('veiculos', 'aeronaves', 'Aeronaves', {'vehicle_type': 'aeronave'}),
-            ('veiculos', 'barcos', 'Barcos', {'vehicle_type': 'barco'}),
-            ('veiculos', 'caminhoes', 'Caminhões', {'vehicle_type': 'caminhao'}),
-            ('veiculos', 'carros', 'Carros', {'vehicle_type': 'carro'}),
-            ('veiculos', 'motos', 'Motos', {'vehicle_type': 'moto'}),
-            ('veiculos', 'onibus', 'Ônibus', {'vehicle_type': 'onibus'}),
+        # MAPEAMENTO DIRETO: (url_path, tabela_destino, nome_exibicao, campos_extras)
+        self.sections = [
+            # ========== VEÍCULOS (6 tipos) ==========
+            ('veiculos/aeronaves', 'veiculos', 'Aeronaves', {'vehicle_type': 'aeronave'}),
+            ('veiculos/barcos', 'veiculos', 'Barcos', {'vehicle_type': 'barco'}),
+            ('veiculos/caminhoes', 'veiculos', 'Caminhões', {'vehicle_type': 'caminhao'}),
+            ('veiculos/carros', 'veiculos', 'Carros', {'vehicle_type': 'carro'}),
+            ('veiculos/motos', 'veiculos', 'Motos', {'vehicle_type': 'moto'}),
+            ('veiculos/onibus', 'veiculos', 'Ônibus', {'vehicle_type': 'onibus'}),
             
-            # OUTRAS CATEGORIAS (sem subcategoria e sem vehicle_type)
-            ('imoveis', None, 'Imóveis', {}),
-            ('bens-de-consumo', None, 'Bens de Consumo', {}),
-            ('industrial', None, 'Industrial', {}),
-            ('animais', None, 'Animais', {}),
-            ('outros', None, 'Outros', {}),
+            # ========== IMÓVEIS (14 tipos) ==========
+            ('imoveis/apartamentos', 'imoveis', 'Apartamentos', {'property_type': 'apartamento'}),
+            ('imoveis/casas', 'imoveis', 'Casas', {'property_type': 'casa'}),
+            ('imoveis/galpoes--industriais', 'imoveis', 'Galpões Industriais', {'property_type': 'galpao_industrial'}),
+            ('imoveis/glebas', 'imoveis', 'Glebas', {'property_type': 'gleba'}),
+            ('imoveis/deposito-de-garagem', 'imoveis', 'Depósito de Garagem', {'property_type': 'deposito_garagem'}),
+            ('imoveis/hospitais', 'imoveis', 'Hospitais', {'property_type': 'hospital'}),
+            ('imoveis/hoteis', 'imoveis', 'Hotéis', {'property_type': 'hotel'}),
+            ('imoveis/imoveis-comerciais', 'imoveis', 'Imóveis Comerciais', {'property_type': 'comercial'}),
+            ('imoveis/imoveis-rurais', 'imoveis', 'Imóveis Rurais', {'property_type': 'rural'}),
+            ('imoveis/outros', 'imoveis', 'Outros Imóveis', {'property_type': 'outro'}),
+            ('imoveis/resorts', 'imoveis', 'Resorts', {'property_type': 'resort'}),
+            ('imoveis/terrenos-e-lotes', 'imoveis', 'Terrenos e Lotes', {'property_type': 'terreno_lote'}),
+            ('imoveis/terrenos-para-incorporacao', 'imoveis', 'Terrenos p/ Incorporação', {'property_type': 'terreno_incorporacao'}),
+            ('imoveis/vagas-de-garagem', 'imoveis', 'Vagas de Garagem', {'property_type': 'vaga_garagem'}),
+            
+            # ========== ELETRODOMÉSTICOS ==========
+            ('bens-de-consumo/eletrodomesticos', 'eletrodomesticos', 'Eletrodomésticos', {}),
+            
+            # ========== TECNOLOGIA ==========
+            ('bens-de-consumo/eletronicos', 'tecnologia', 'Eletrônicos', {}),
+            
+            # ========== MÓVEIS ==========
+            ('bens-de-consumo/moveis', 'moveis_decoracao', 'Móveis', {}),
+            
+            # ========== INDUSTRIAL ==========
+            ('industrial/maquinas', 'industrial_equipamentos', 'Máquinas Industriais', {}),
+            
+            # ========== ANIMAIS (2 tipos) ==========
+            ('animais/cavalos', 'animais', 'Cavalos', {'animal_type': 'cavalo'}),
+            ('animais/gado-bovino', 'animais', 'Gado Bovino', {'animal_type': 'gado_bovino'}),
+            
+            # ========== DIVERSOS ==========
+            ('outros/diversos', 'diversos', 'Diversos', {}),
+            
+            # ========== ARTES ==========
+            ('outros/obras-de-arte', 'artes_colecionismo', 'Obras de Arte', {}),
         ]
         
         self.stats = {
             'total_scraped': 0,
+            'by_table': defaultdict(int),
             'by_section': {},
             'duplicates': 0,
         }
     
-    def scrape(self) -> List[dict]:
-        """Scrape completo do MegaLeilões"""
+    def scrape(self) -> dict:
+        """
+        Scrape completo do MegaLeilões
+        Returns: dict com items agrupados por tabela
+        """
         print("\n" + "="*60)
-        print("🟢 MEGALEILÕES - DOMÍNIO COMPLETO")
+        print("🟢 MEGALEILÕES - SCRAPER SIMPLIFICADO")
         print("="*60)
         
-        all_items = []
+        items_by_table = defaultdict(list)
         global_ids = set()
         
         # Captura cookies primeiro
@@ -88,21 +120,20 @@ class MegaLeiloesScraper:
                 
                 page = context.new_page()
                 
-                # Varre cada seção principal
-                for main_category, subcategory, display_name, extra_fields in self.main_sections:
-                    print(f"\n📦 Seção: {display_name}")
+                # Varre cada seção
+                for url_path, table, display_name, extra_fields in self.sections:
+                    print(f"\n📦 {display_name} → {table}")
                     
-                    section_key = f"{main_category}/{subcategory}" if subcategory else main_category
                     section_items = self._scrape_section(
-                        page, main_category, subcategory, display_name, extra_fields, global_ids
+                        page, url_path, table, display_name, extra_fields, global_ids
                     )
                     
-                    all_items.extend(section_items)
-                    self.stats['by_section'][section_key] = len(section_items)
+                    items_by_table[table].extend(section_items)
+                    self.stats['by_section'][url_path] = len(section_items)
+                    self.stats['by_table'][table] += len(section_items)
                     
-                    print(f"✅ {len(section_items)} itens coletados")
+                    print(f"✅ {len(section_items)} itens → {table}")
                     
-                    # Pequeno delay entre seções
                     time.sleep(2)
                 
                 browser.close()
@@ -110,29 +141,20 @@ class MegaLeiloesScraper:
         except Exception as e:
             print(f"❌ Erro geral: {e}")
         
-        self.stats['total_scraped'] = len(all_items)
-        return all_items
+        self.stats['total_scraped'] = sum(len(items) for items in items_by_table.values())
+        return items_by_table
     
     def _get_cookies(self) -> List[dict]:
         """Captura cookies do MegaLeilões"""
-        print("  🍪 Capturando cookies MegaLeilões...")
+        print("  🍪 Capturando cookies...")
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-blink-features=AutomationControlled']
-                )
-                
+                browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
                 context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     viewport={'width': 1920, 'height': 1080},
                     locale='pt-BR'
                 )
-                
-                context.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    window.chrome = {runtime: {}};
-                """)
                 
                 page = context.new_page()
                 page.goto(self.base_url, wait_until="domcontentloaded", timeout=30000)
@@ -148,9 +170,10 @@ class MegaLeiloesScraper:
             print(f"    ⚠️ Erro ao capturar cookies: {e}")
             return []
     
-    def _scrape_section(self, page, main_category: str, subcategory: Optional[str],
-                       display_name: str, extra_fields: dict, global_ids: set) -> List[dict]:
-        """Scrape uma seção completa do MegaLeilões"""
+    def _scrape_section(self, page, url_path: str, table: str, 
+                       display_name: str, extra_fields: dict, 
+                       global_ids: set) -> List[dict]:
+        """Scrape uma seção específica"""
         items = []
         page_num = 1
         consecutive_empty = 0
@@ -158,19 +181,11 @@ class MegaLeiloesScraper:
         max_pages = 50
         
         while page_num <= max_pages and consecutive_empty < max_empty:
-            # Monta URL da página
-            if subcategory:
-                # Veículos com subcategoria
-                if page_num == 1:
-                    url = f"{self.base_url}/{main_category}/{subcategory}"
-                else:
-                    url = f"{self.base_url}/{main_category}/{subcategory}?pagina={page_num}"
+            # Monta URL
+            if page_num == 1:
+                url = f"{self.base_url}/{url_path}"
             else:
-                # Outras categorias sem subcategoria
-                if page_num == 1:
-                    url = f"{self.base_url}/{main_category}"
-                else:
-                    url = f"{self.base_url}/{main_category}?pagina={page_num}"
+                url = f"{self.base_url}/{url_path}?pagina={page_num}"
             
             print(f"  Pág {page_num}", end='', flush=True)
             
@@ -185,7 +200,7 @@ class MegaLeiloesScraper:
                 html = page.content()
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                # Seletor de cards do MegaLeilões
+                # Seletor de cards
                 cards = soup.select('div.card, .leilao-card, div[class*="card"]')
                 
                 if not cards:
@@ -196,13 +211,11 @@ class MegaLeiloesScraper:
                 
                 novos = 0
                 duplicados = 0
-                filtrados = 0
                 
                 for card in cards:
-                    item = self._extract_card(card, main_category, subcategory, display_name, extra_fields)
+                    item = self._extract_card(card, table, display_name, extra_fields)
                     
                     if not item:
-                        filtrados += 1
                         continue
                     
                     # Verifica duplicata
@@ -216,10 +229,10 @@ class MegaLeiloesScraper:
                     novos += 1
                 
                 if novos > 0:
-                    print(f" ✅ +{novos} | Total seção: {len(items)}")
+                    print(f" ✅ +{novos}")
                     consecutive_empty = 0
                 else:
-                    print(f" ⚪ 0 novos (dup: {duplicados}, filt: {filtrados})")
+                    print(f" ⚪ 0 novos (dup: {duplicados})")
                     consecutive_empty += 1
                 
                 page_num += 1
@@ -232,13 +245,9 @@ class MegaLeiloesScraper:
         
         return items
     
-    def _extract_card(self, card, main_category: str, subcategory: Optional[str],
-                     display_name: str, extra_fields: dict) -> Optional[dict]:
-        """
-        Extrai dados do card MegaLeilões.
-        NÃO decide categoria final - apenas coleta dados brutos.
-        Mantém vehicle_type quando disponível (veículos).
-        """
+    def _extract_card(self, card, table: str, display_name: str, 
+                     extra_fields: dict) -> Optional[dict]:
+        """Extrai dados do card - dados limpos, sem decidir categoria"""
         try:
             # Link
             link_elem = card.select_one('a[href]')
@@ -258,9 +267,8 @@ class MegaLeiloesScraper:
             
             # Evita links de categorias/listagens
             invalid_endings = [
-                '/imoveis', '/veiculos', '/bens-de-consumo', '/industrial', '/animais', '/outros',
-                '/carros', '/motos', '/caminhoes', '/onibus', '/casas', '/apartamentos',
-                '/aeronaves', '/barcos'  # Adiciona as novas subcategorias
+                '/imoveis', '/veiculos', '/bens-de-consumo', '/industrial', 
+                '/animais', '/outros', '/carros', '/motos', '/apartamentos'
             ]
             
             if any(link_clean.endswith(ending) for ending in invalid_endings):
@@ -270,14 +278,14 @@ class MegaLeiloesScraper:
             external_id = None
             parts = link.rstrip('/').split('/')
             for part in reversed(parts):
-                if part and not part.startswith('?') and part not in ['imoveis', 'veiculos', 'bens-de-consumo', 'industrial', 'animais', 'outros', 'aeronaves', 'barcos']:
+                if part and not part.startswith('?'):
                     external_id = f"megaleiloes_{part.split('?')[0]}"
                     break
             
             if not external_id or external_id == 'megaleiloes_':
                 return None
             
-            # Texto do card (título + descrição)
+            # Texto do card
             texto = card.get_text(separator=' ', strip=True)
             
             # Filtra cards de UI/paginação
@@ -288,19 +296,25 @@ class MegaLeiloesScraper:
             if len(texto) < 10:
                 return None
             
-            # Título (primeiros 150 chars do texto)
+            # Título (primeiros 150 chars)
             title = texto[:150].strip() if texto else f"Item {display_name}"
             
-            # Preço
-            value = None
-            value_text = None
-            price_match = re.search(r'R\$\s*([\d.]+,\d{2})', texto)
-            if price_match:
-                value_text = f"R$ {price_match.group(1)}"
-                try:
-                    value = float(price_match.group(1).replace('.', '').replace(',', '.'))
-                except:
-                    pass
+            # ✅ EXTRAI INFORMAÇÕES DE PRAÇA DO HTML
+            auction_info = self._extract_auction_info_from_html(card)
+            
+            # Preço (usa preço da praça ativa se disponível)
+            value = auction_info.get('current_value')
+            value_text = auction_info.get('current_value_text')
+            
+            # Fallback para preço no texto se não encontrou nas divs
+            if not value:
+                price_match = re.search(r'R\$\s*([\d.]+,\d{2})', texto)
+                if price_match:
+                    value_text = f"R$ {price_match.group(1)}"
+                    try:
+                        value = float(price_match.group(1).replace('.', '').replace(',', '.'))
+                    except:
+                        pass
             
             # Estado
             state = None
@@ -318,47 +332,153 @@ class MegaLeiloesScraper:
             if city_match:
                 city = city_match.group(1).strip()
             
-            # ✅ MONTA ITEM BASE - SEM DECIDIR CATEGORIA
-            section_key = f"{main_category}/{subcategory}" if subcategory else main_category
-            
+            # Monta item base
             item = {
                 'source': 'megaleiloes',
                 'external_id': external_id,
                 'title': title,
                 'description': texto,
-                'description_preview': texto[:200] if len(texto) > 200 else texto,
                 'value': value,
                 'value_text': value_text,
                 'city': city,
                 'state': state,
                 'link': link,
+                'target_table': table,  # ✅ Tabela de destino já definida
                 
-                # Categoria ORIGINAL do site (só metadata, não decisão)
-                'raw_category': section_key,
+                # ✅ Informações de praça extraídas do HTML
+                'auction_round': auction_info.get('auction_round'),
+                'auction_date': auction_info.get('auction_date'),
+                'first_round_value': auction_info.get('first_round_value'),
+                'first_round_date': auction_info.get('first_round_date'),
+                'discount_percentage': auction_info.get('discount_percentage'),
                 
                 'metadata': {
                     'secao_site': display_name,
-                    'categoria_principal': main_category,
-                    'subcategoria': subcategory,
                 }
             }
             
-            # ✅ ADICIONA VEHICLE_TYPE APENAS PARA VEÍCULOS
-            # Isso ajuda os handlers de busca, mas NÃO define a tabela final
-            if 'vehicle_type' in extra_fields:
-                item['vehicle_type'] = extra_fields['vehicle_type']
+            # Adiciona campos extras (vehicle_type, property_type, animal_type)
+            if extra_fields:
+                item.update(extra_fields)
             
             return item
             
         except Exception as e:
-            # Silencioso - não loga cada erro de parsing
             return None
+    
+    def _extract_auction_info_from_html(self, card) -> dict:
+        """
+        ✅ Extrai informações de praça dos elementos HTML do card
+        
+        Busca por:
+        - <div class="instance first passed"> → 1ª praça (já passou)
+        - <div class="instance active"> → 2ª praça (ativa)
+        - .card-first-instance-date → data da 1ª praça
+        - .card-second-instance-date → data da 2ª praça
+        - .card-instance-value → valores
+        """
+        info = {
+            'auction_round': None,
+            'auction_date': None,
+            'current_value': None,
+            'current_value_text': None,
+            'first_round_value': None,
+            'first_round_date': None,
+            'discount_percentage': None,
+        }
+        
+        # Busca praça ativa
+        active_instance = card.select_one('.instance.active')
+        
+        if active_instance:
+            # Determina qual praça está ativa
+            if active_instance.select_one('.card-second-instance-date'):
+                info['auction_round'] = 2
+                
+                # Data da 2ª praça
+                date_elem = active_instance.select_one('.card-second-instance-date')
+                if date_elem:
+                    date_text = date_elem.get_text(strip=True)
+                    # Extrai data: "2ª Praça: 07/01/2026 às 15:02"
+                    date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
+                    if date_match:
+                        info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+                
+                # Valor da 2ª praça
+                value_elem = active_instance.select_one('.card-instance-value')
+                if value_elem:
+                    value_text = value_elem.get_text(strip=True)
+                    info['current_value_text'] = value_text
+                    
+                    # Parse valor
+                    value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
+                    if value_match:
+                        try:
+                            info['current_value'] = float(value_match.group(1).replace('.', '').replace(',', '.'))
+                        except:
+                            pass
+            
+            elif active_instance.select_one('.card-first-instance-date'):
+                info['auction_round'] = 1
+                
+                # Data da 1ª praça
+                date_elem = active_instance.select_one('.card-first-instance-date')
+                if date_elem:
+                    date_text = date_elem.get_text(strip=True)
+                    date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
+                    if date_match:
+                        info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+                
+                # Valor da 1ª praça
+                value_elem = active_instance.select_one('.card-instance-value')
+                if value_elem:
+                    value_text = value_elem.get_text(strip=True)
+                    info['current_value_text'] = value_text
+                    
+                    value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
+                    if value_match:
+                        try:
+                            info['current_value'] = float(value_match.group(1).replace('.', '').replace(',', '.'))
+                        except:
+                            pass
+        
+        # Busca 1ª praça (se já passou e agora está na 2ª)
+        first_instance = card.select_one('.instance.first.passed')
+        if first_instance:
+            # Data da 1ª praça
+            date_elem = first_instance.select_one('.card-first-instance-date')
+            if date_elem:
+                date_text = date_elem.get_text(strip=True)
+                date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
+                if date_match:
+                    info['first_round_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+            
+            # Valor da 1ª praça
+            value_elem = first_instance.select_one('.card-instance-value')
+            if value_elem:
+                value_text = value_elem.get_text(strip=True)
+                value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
+                if value_match:
+                    try:
+                        info['first_round_value'] = float(value_match.group(1).replace('.', '').replace(',', '.'))
+                    except:
+                        pass
+        
+        # Calcula desconto se temos ambos os valores
+        if info['first_round_value'] and info['current_value'] and info['auction_round'] == 2:
+            try:
+                discount = ((info['first_round_value'] - info['current_value']) / info['first_round_value']) * 100
+                info['discount_percentage'] = round(discount, 2)
+            except:
+                pass
+        
+        return info
 
 
 def main():
     """Execução principal"""
     print("\n" + "="*70)
-    print("🚀 MEGALEILÕES - SCRAPER COMPLETO DO DOMÍNIO")
+    print("🚀 MEGALEILÕES - SCRAPER SIMPLIFICADO")
     print("="*70)
     print(f"📅 Início: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
@@ -370,12 +490,14 @@ def main():
     # ========================================
     print("\n🔥 FASE 1: COLETANDO DADOS")
     scraper = MegaLeiloesScraper()
-    items = scraper.scrape()
+    items_by_table = scraper.scrape()
     
-    print(f"\n✅ Total coletado: {len(items)} itens")
-    print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
+    total_items = sum(len(items) for items in items_by_table.values())
     
-    if not items:
+    print(f"\n✅ Total coletado: {total_items} itens")
+    print(f"📄 Duplicatas filtradas: {scraper.stats['duplicates']}")
+    
+    if not total_items:
         print("⚠️ Nenhum item coletado - encerrando")
         return
     
@@ -383,59 +505,36 @@ def main():
     # FASE 2: NORMALIZAÇÃO
     # ========================================
     print("\n✨ FASE 2: NORMALIZANDO DADOS")
-    try:
-        normalized_items = normalize_items(items)
-        print(f"✅ {len(normalized_items)} itens normalizados")
-    except Exception as e:
-        print(f"⚠️ Erro na normalização: {e}")
-        print("Usando dados brutos...")
-        normalized_items = items
     
-    # Salva JSON normalizado (para debug)
+    normalized_by_table = {}
+    
+    for table, items in items_by_table.items():
+        if not items:
+            continue
+        
+        try:
+            normalized = normalize_items(items)
+            normalized_by_table[table] = normalized
+            print(f"  ✅ {table}: {len(normalized)} itens normalizados")
+        except Exception as e:
+            print(f"  ⚠️ Erro em {table}: {e}")
+            normalized_by_table[table] = items
+    
+    # Salva JSON normalizado (debug)
     output_dir = Path(__file__).parent / 'data' / 'normalized'
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     json_file = output_dir / f'megaleiloes_{timestamp}.json'
     
     with open(json_file, 'w', encoding='utf-8') as f:
-        json.dump(normalized_items, f, ensure_ascii=False, indent=2)
+        json.dump(normalized_by_table, f, ensure_ascii=False, indent=2)
     print(f"💾 JSON salvo: {json_file}")
     
     # ========================================
-    # FASE 3: CLASSIFICAÇÃO GROQ
+    # FASE 3: INSERT NO SUPABASE
     # ========================================
-    print("\n🤖 FASE 3: CLASSIFICANDO COM GROQ AI")
-    try:
-        classifier = GroqTableClassifier()
-        items_by_table = defaultdict(list)
-        
-        for i, item in enumerate(normalized_items, 1):
-            if i % 10 == 0:
-                print(f"  ⏳ {i}/{len(normalized_items)}")
-            
-            table = classifier.classify(item)
-            if table:
-                items_by_table[table].append(item)
-            
-            time.sleep(0.2)  # Rate limit Groq
-        
-        print(f"✅ Classificação concluída!")
-        print(f"\n📊 Distribuição por tabela:")
-        for table, table_items in sorted(items_by_table.items()):
-            print(f"  • {table}: {len(table_items)} itens")
-        
-        # Print stats do classifier
-        classifier.print_stats()
+    print("\n📤 FASE 3: INSERINDO NO SUPABASE")
     
-    except Exception as e:
-        print(f"⚠️ Erro na classificação: {e}")
-        print("Colocando tudo em 'oportunidades'...")
-        items_by_table = {'oportunidades': normalized_items}
-    
-    # ========================================
-    # FASE 4: INSERT NO SUPABASE
-    # ========================================
-    print("\n📤 FASE 4: INSERINDO NO SUPABASE")
     try:
         supabase = SupabaseClient()
         
@@ -445,12 +544,12 @@ def main():
             total_inserted = 0
             total_updated = 0
             
-            for table, table_items in items_by_table.items():
-                if not table_items:
+            for table, items in normalized_by_table.items():
+                if not items:
                     continue
                 
-                print(f"\n  📤 Tabela '{table}': {len(table_items)} itens")
-                stats = supabase.upsert(table, table_items)
+                print(f"\n  📤 Tabela '{table}': {len(items)} itens")
+                stats = supabase.upsert(table, items)
                 
                 print(f"    ✅ Inseridos: {stats['inserted']}")
                 print(f"    🔄 Atualizados: {stats['updated']}")
@@ -477,10 +576,10 @@ def main():
     print("\n" + "="*70)
     print("📊 ESTATÍSTICAS FINAIS")
     print("="*70)
-    print(f"🟢 MegaLeilões - Domínio Completo:")
-    print(f"\n  Por Seção do Site:")
-    for section, count in sorted(scraper.stats['by_section'].items()):
-        print(f"    • {section}: {count} itens")
+    print(f"🟢 MegaLeilões - Scraper Simplificado:")
+    print(f"\n  Por Tabela:")
+    for table, count in sorted(scraper.stats['by_table'].items()):
+        print(f"    • {table}: {count} itens")
     print(f"\n  • Total coletado: {scraper.stats['total_scraped']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
     print(f"\n⏱️ Duração: {minutes}min {seconds}s")

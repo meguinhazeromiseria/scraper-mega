@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""SUPABASE CLIENT - Genérico para todas as tabelas"""
+"""
+SUPABASE CLIENT - Genérico para todas as tabelas
+Suporta campos especiais: vehicle_type, property_type, animal_type
+"""
 
 import os
 import time
@@ -50,7 +53,7 @@ class SupabaseClient:
             print("  ⚠️ Nenhum item válido para inserir")
             return {'inserted': 0, 'updated': 0, 'errors': 0}
         
-        # 🔧 Normaliza chaves do batch (remove campos inválidos por tabela)
+        # Normaliza chaves do batch (remove campos inválidos por tabela)
         prepared = self._normalize_batch_keys(prepared, tabela)
         
         stats = {'inserted': 0, 'updated': 0, 'errors': 0}
@@ -100,14 +103,22 @@ class SupabaseClient:
             'link', 'metadata', 'duplicate_group', 'is_primary_duplicate',
             'is_active', 'created_at', 'updated_at', 'last_scraped_at',
             'market_price', 'market_price_source', 'market_price_updated_at',
-            'market_price_confidence', 'market_price_metadata'
+            'market_price_confidence', 'market_price_metadata',
+            # ✅ Novos campos de praça
+            'auction_round', 'discount_percentage', 'first_round_value', 'first_round_date'
         }
         
         # Campos específicos por tabela
         table_specific_fields = {
             'veiculos': {'vehicle_type'},
-            'tecnologia': {'multiplecategory'},
-            # Outras tabelas só têm campos padrão
+            'imoveis': {'property_type'},
+            'animais': {'animal_type'},
+            'tecnologia': {'multiplecategory', 'tech_type'},
+            'bens_consumo': {'consumption_goods_type'},
+            'partes_pecas': {'parts_type'},
+            'nichados': {'specialized_type'},
+            'eletrodomesticos': {'appliance_type'},
+            'materiais_construcao': {'construction_material_type'},
         }
         
         # Campos permitidos para esta tabela
@@ -136,7 +147,7 @@ class SupabaseClient:
         """Prepara item para inserção no banco"""
         source = item.get('source')
         external_id = item.get('external_id')
-        title = item.get('title') or 'Sem título'
+        title = item.get('title') or 'Sem Título'
         
         if not source or not external_id:
             return None
@@ -198,6 +209,11 @@ class SupabaseClient:
             'metadata': metadata,
             'is_active': True,
             'last_scraped_at': datetime.now().isoformat(),
+            # ✅ Informações de praça
+            'auction_round': int(item.get('auction_round')) if item.get('auction_round') is not None else None,
+            'discount_percentage': float(item.get('discount_percentage')) if item.get('discount_percentage') is not None else None,
+            'first_round_value': float(item.get('first_round_value')) if item.get('first_round_value') is not None else None,
+            'first_round_date': str(item.get('first_round_date')) if item.get('first_round_date') else None,
         }
         
         # ✅ Campos específicos por tabela
@@ -210,13 +226,85 @@ class SupabaseClient:
             if vehicle_type:
                 data['vehicle_type'] = str(vehicle_type)[:255]
         
+        if tabela == 'imoveis':
+            # Property type para imóveis
+            property_type = item.get('property_type')
+            if not property_type and isinstance(metadata, dict):
+                property_type = metadata.get('property_type')
+            
+            if property_type:
+                data['property_type'] = str(property_type)[:255]
+        
+        if tabela == 'animais':
+            # Animal type para animais
+            animal_type = item.get('animal_type')
+            if not animal_type and isinstance(metadata, dict):
+                animal_type = metadata.get('animal_type')
+            
+            if animal_type:
+                data['animal_type'] = str(animal_type)[:255]
+        
         if tabela == 'tecnologia':
+            # Multiple category para tecnologia
             multiplecategory = item.get('multiplecategory')
             if not multiplecategory and isinstance(metadata, dict):
                 multiplecategory = metadata.get('multiplecategory')
             
             if multiplecategory and isinstance(multiplecategory, list):
                 data['multiplecategory'] = multiplecategory
+            
+            # Tech type (novo campo adicional)
+            tech_type = item.get('tech_type')
+            if not tech_type and isinstance(metadata, dict):
+                tech_type = metadata.get('tech_type')
+            
+            if tech_type:
+                data['tech_type'] = str(tech_type)[:255]
+        
+        if tabela == 'bens_consumo':
+            # Consumption goods type
+            consumption_goods_type = item.get('consumption_goods_type')
+            if not consumption_goods_type and isinstance(metadata, dict):
+                consumption_goods_type = metadata.get('consumption_goods_type')
+            
+            if consumption_goods_type:
+                data['consumption_goods_type'] = str(consumption_goods_type)[:255]
+        
+        if tabela == 'partes_pecas':
+            # Parts type
+            parts_type = item.get('parts_type')
+            if not parts_type and isinstance(metadata, dict):
+                parts_type = metadata.get('parts_type')
+            
+            if parts_type:
+                data['parts_type'] = str(parts_type)[:255]
+        
+        if tabela == 'nichados':
+            # Specialized type
+            specialized_type = item.get('specialized_type')
+            if not specialized_type and isinstance(metadata, dict):
+                specialized_type = metadata.get('specialized_type')
+            
+            if specialized_type:
+                data['specialized_type'] = str(specialized_type)[:255]
+        
+        if tabela == 'eletrodomesticos':
+            # Appliance type
+            appliance_type = item.get('appliance_type')
+            if not appliance_type and isinstance(metadata, dict):
+                appliance_type = metadata.get('appliance_type')
+            
+            if appliance_type:
+                data['appliance_type'] = str(appliance_type)[:255]
+        
+        if tabela == 'materiais_construcao':
+            # Construction material type
+            construction_material_type = item.get('construction_material_type')
+            if not construction_material_type and isinstance(metadata, dict):
+                construction_material_type = metadata.get('construction_material_type')
+            
+            if construction_material_type:
+                data['construction_material_type'] = str(construction_material_type)[:255]
         
         return data
     

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SUPERBID - SCRAPER COMPLETO DO DOMÍNIO
-Varre TODO o site Superbid via API REST
-Scrape → Normalize → Classify → Insert
+SUPERBID - SCRAPER SIMPLIFICADO
+Mapeamento direto: URL do site → Tabela do banco
+Sem IA, sem keywords, apenas categorias oficiais do Superbid
 """
 
 import sys
@@ -16,61 +16,116 @@ from datetime import datetime
 from collections import defaultdict
 from typing import List, Optional
 
-# Adiciona pasta pai ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from supabase_client import SupabaseClient
-from groq_classifier import GroqTableClassifier
 from normalizer import normalize_items
 
 
 class SuperbidScraper:
-    """Scraper completo do domínio Superbid via API REST"""
+    """Scraper com mapeamento direto de categorias do site"""
     
     def __init__(self):
         self.source = 'superbid'
         self.base_url = 'https://offer-query.superbid.net/seo/offers/'
         self.site_url = 'https://exchange.superbid.net'
-        self.session = requests.Session()
         
-        # Todas as seções do Superbid
-        # Para veículos: usa subcategorias específicas com vehicle_type
-        # Para outras: usa categoria principal
-        self.main_sections = [
-            # VEÍCULOS (subcategorias específicas para manter vehicle_type)
-            ('carros-motos/carros', 'Carros', {'vehicle_type': 'carro'}),
-            ('carros-motos/motos', 'Motos', {'vehicle_type': 'moto'}),
-            ('caminhoes-onibus/caminhoes', 'Caminhões', {'vehicle_type': 'caminhao'}),
-            ('caminhoes-onibus/onibus', 'Ônibus', {'vehicle_type': 'onibus'}),
-            ('caminhoes-onibus/vans', 'Vans', {'vehicle_type': 'van'}),
+        # MAPEAMENTO DIRETO: (url_slug, tabela_destino, nome_exibicao, campos_extras)
+        self.sections = [
+            # ========== ALIMENTOS E BEBIDAS ==========
+            ('alimentos-e-bebidas', 'alimentos_bebidas', 'Alimentos e Bebidas', {}),
             
-            # OUTRAS CATEGORIAS (sem vehicle_type)
-            ('embarcacoes-aeronaves', 'Embarcações e Aeronaves', {}),
-            ('imoveis', 'Imóveis', {}),
-            ('tecnologia', 'Tecnologia', {}),
-            ('eletrodomesticos', 'Eletrodomésticos', {}),
-            ('industrial-maquinas-equipamentos', 'Industrial, Máquinas e Equipamentos', {}),
-            ('maquinas-pesadas-agricolas', 'Máquinas Pesadas e Agrícolas', {}),
-            ('materiais-para-construcao-civil', 'Materiais para Construção Civil', {}),
-            ('moveis-e-decoracao', 'Móveis e Decoração', {}),
-            ('cozinhas-e-restaurantes', 'Cozinhas e Restaurantes', {}),
-            ('movimentacao-transporte', 'Movimentação e Transporte', {}),
-            ('partes-e-pecas', 'Partes e Peças', {}),
-            ('sucatas-materiais-residuos', 'Sucatas, Materiais e Resíduos', {}),
-            ('alimentos-e-bebidas', 'Alimentos e Bebidas', {}),
-            ('animais', 'Animais', {}),
-            ('artes-decoracao-colecionismo', 'Artes, Decoração e Colecionismo', {}),
-            ('bolsas-canetas-joias-e-relogios', 'Bolsas, Canetas, Joias e Relógios', {}),
-            ('oportunidades', 'Oportunidades', {}),
+            # ========== ANIMAIS (1 tipo) ==========
+            ('animais/bovinos', 'animais', 'Bovinos', {'animal_type': 'gado_bovino'}),
+            
+            # ========== ARTES E COLECIONISMO ==========
+            ('artes-decoracao-colecionismo', 'artes_colecionismo', 'Artes e Colecionismo', {}),
+            
+            # ========== BENS DE CONSUMO (9 tipos) ==========
+            ('bolsas-canetas-joias-e-relogios/acessorios', 'bens_consumo', 'Acessórios', {'consumption_goods_type': 'acessorios'}),
+            ('bolsas-canetas-joias-e-relogios/bolsas', 'bens_consumo', 'Bolsas', {'consumption_goods_type': 'bolsas'}),
+            ('bolsas-canetas-joias-e-relogios/canetas', 'bens_consumo', 'Canetas', {'consumption_goods_type': 'canetas'}),
+            ('bolsas-canetas-joias-e-relogios/relogios', 'bens_consumo', 'Relógios', {'consumption_goods_type': 'relogios'}),
+            ('oportunidades/beneficentes', 'bens_consumo', 'Beneficentes', {'consumption_goods_type': 'beneficentes'}),
+            ('oportunidades/lazer', 'bens_consumo', 'Lazer', {'consumption_goods_type': 'lazer'}),
+            ('oportunidades/esportes', 'bens_consumo', 'Esportes', {'consumption_goods_type': 'esportes'}),
+            ('oportunidades/pet', 'bens_consumo', 'Pet', {'consumption_goods_type': 'pet'}),
+            ('oportunidades/vestuarios', 'bens_consumo', 'Vestuários', {'consumption_goods_type': 'vestuarios'}),
+            
+            # ========== VEÍCULOS - CAMINHÕES/ÔNIBUS (4 tipos) ==========
+            ('caminhoes-onibus/onibus', 'veiculos', 'Ônibus', {'vehicle_type': 'onibus'}),
+            ('caminhoes-onibus/caminhoes', 'veiculos', 'Caminhões', {'vehicle_type': 'caminhao'}),
+            ('caminhoes-onibus/vans', 'veiculos', 'Vans', {'vehicle_type': 'van'}),
+            ('caminhoes-onibus/impl-rod-e-carrocerias', 'veiculos', 'Implementos Rodoviários', {'vehicle_type': 'implemento_rodoviario'}),
+            
+            # ========== VEÍCULOS - CARROS/MOTOS (3 tipos) ==========
+            ('carros-motos/carros', 'veiculos', 'Carros', {'vehicle_type': 'carro'}),
+            ('carros-motos/motos', 'veiculos', 'Motos', {'vehicle_type': 'moto'}),
+            ('carros-motos/varias-ferramentas', 'veiculos', 'Veículos Diversos', {'vehicle_type': 'outro'}),
+            
+            # ========== VEÍCULOS - EMBARCAÇÕES/AERONAVES (4 tipos) ==========
+            ('embarcacoes-aeronaves/embarcacoes-e-navios', 'veiculos', 'Embarcações e Navios', {'vehicle_type': 'barco'}),
+            ('embarcacoes-aeronaves/jet-skis', 'veiculos', 'Jet Skis', {'vehicle_type': 'jetski'}),
+            ('embarcacoes-aeronaves/lanchas-e-barcos', 'veiculos', 'Lanchas e Barcos', {'vehicle_type': 'barco'}),
+            ('embarcacoes-aeronaves/avioes', 'veiculos', 'Aviões', {'vehicle_type': 'aeronave'}),
+            
+            # ========== PARTES E PEÇAS (4 tipos) ==========
+            ('caminhoes-onibus/partes-e-pecas-caminhoes-e-onibus', 'partes_pecas', 'Peças Caminhões/Ônibus', {'parts_type': 'caminhoes_onibus'}),
+            ('carros-motos/partes-e-pecas-carros-e-motos', 'partes_pecas', 'Peças Carros/Motos', {'parts_type': 'carros_motos'}),
+            ('embarcacoes-aeronaves/pecas-e-acessorios', 'partes_pecas', 'Peças Embarcações/Aeronaves', {'parts_type': 'embarcacoes_aeronaves'}),
+            ('partes-e-pecas', 'partes_pecas', 'Peças Variadas', {'parts_type': 'variados'}),
+            
+            # ========== NICHADOS (3 tipos) ==========
+            ('cozinhas-e-restaurantes/restaurantes', 'nichados', 'Restaurantes', {'specialized_type': 'restaurante'}),
+            ('cozinhas-e-restaurantes/cozinhas-industriais', 'nichados', 'Cozinhas Industriais', {'specialized_type': 'cozinha_industrial'}),
+            ('oportunidades/negocios', 'nichados', 'Negócios', {'specialized_type': 'negocios'}),
+            
+            # ========== ELETRODOMÉSTICOS (4 tipos) ==========
+            ('eletrodomesticos/refrigeradores', 'eletrodomesticos', 'Refrigeradores', {'appliance_type': 'refrigerador'}),
+            ('eletrodomesticos/fornos-e-fogoes', 'eletrodomesticos', 'Fornos e Fogões', {'appliance_type': 'fogao_forno'}),
+            ('eletrodomesticos/eletroportateis', 'eletrodomesticos', 'Eletroportáteis', {'appliance_type': 'eletroportatil'}),
+            ('eletrodomesticos/limpeza', 'eletrodomesticos', 'Limpeza', {'appliance_type': 'limpeza'}),
+            
+            # ========== IMÓVEIS (6 tipos) ==========
+            ('imoveis/imoveis-industriais', 'imoveis', 'Imóveis Industriais', {'property_type': 'galpao_industrial'}),
+            ('imoveis/terrenos-e-lotes', 'imoveis', 'Terrenos e Lotes', {'property_type': 'terreno_lote'}),
+            ('imoveis/imoveis-flutuantes', 'imoveis', 'Imóveis Flutuantes', {'property_type': 'flutuante'}),
+            ('imoveis/imoveis-rurais', 'imoveis', 'Imóveis Rurais', {'property_type': 'rural'}),
+            ('imoveis/imoveis-comerciais', 'imoveis', 'Imóveis Comerciais', {'property_type': 'comercial'}),
+            ('imoveis/imoveis-residenciais', 'imoveis', 'Imóveis Residenciais', {'property_type': 'residencial'}),
+            
+            # ========== INDUSTRIAL EQUIPAMENTOS (3 categorias agregadas) ==========
+            ('industrial-maquinas-equipamentos', 'industrial_equipamentos', 'Industrial e Máquinas', {}),
+            ('movimentacao-transporte', 'industrial_equipamentos', 'Movimentação e Transporte', {}),
+            ('oportunidades/teste', 'industrial_equipamentos', 'Equipamentos Teste', {}),
+            
+            # ========== MÁQUINAS PESADAS E AGRÍCOLAS ==========
+            ('maquinas-pesadas-agricolas', 'maquinas_pesadas_agricolas', 'Máquinas Pesadas e Agrícolas', {}),
+            
+            # ========== MATERIAIS CONSTRUÇÃO (3 tipos) ==========
+            ('materiais-para-construcao-civil/ferramentas', 'materiais_construcao', 'Ferramentas', {'construction_material_type': 'ferramentas'}),
+            ('materiais-para-construcao-civil/materiais', 'materiais_construcao', 'Materiais', {'construction_material_type': 'materiais'}),
+            ('materiais-para-construcao-civil/eletrica-e-iluminacao', 'materiais_construcao', 'Elétrica e Iluminação', {'construction_material_type': 'eletrica_iluminacao'}),
+            
+            # ========== MÓVEIS E DECORAÇÃO ==========
+            ('moveis-e-decoracao', 'moveis_decoracao', 'Móveis e Decoração', {}),
+            
+            # ========== SUCATAS E RESÍDUOS ==========
+            ('sucatas-materiais-residuos', 'sucatas_residuos', 'Sucatas e Resíduos', {}),
+            
+            # ========== TECNOLOGIA (3 tipos) ==========
+            ('tecnologia/informatica', 'tecnologia', 'Informática', {'tech_type': 'informatica'}),
+            ('tecnologia/telefonia', 'tecnologia', 'Telefonia', {'tech_type': 'telefonia'}),
+            ('tecnologia/eletronicos', 'tecnologia', 'Eletrônicos', {'tech_type': 'eletronicos'}),
         ]
         
         self.stats = {
             'total_scraped': 0,
+            'by_table': defaultdict(int),
             'by_section': {},
             'duplicates': 0,
         }
         
-        # Headers padrão para API
         self.headers = {
             "accept": "*/*",
             "accept-language": "pt-BR,pt;q=0.9",
@@ -78,34 +133,45 @@ class SuperbidScraper:
             "referer": "https://exchange.superbid.net/",
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
+        
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
     
-    def scrape(self) -> List[dict]:
-        """Scrape completo do Superbid"""
+    def scrape(self) -> dict:
+        """
+        Scrape completo do Superbid
+        Returns: dict com items agrupados por tabela
+        """
         print("\n" + "="*60)
-        print("🔵 SUPERBID - DOMÍNIO COMPLETO")
+        print("🔵 SUPERBID - SCRAPER SIMPLIFICADO")
         print("="*60)
         
-        all_items = []
+        items_by_table = defaultdict(list)
         global_ids = set()
         
-        # Varre cada seção principal
-        for section_slug, section_name, extra_fields in self.main_sections:
-            print(f"\n📦 Seção: {section_name}")
-            section_items = self._scrape_section(section_slug, section_name, extra_fields, global_ids)
+        # Varre cada seção
+        for url_slug, table, display_name, extra_fields in self.sections:
+            print(f"\n📦 {display_name} → {table}")
             
-            all_items.extend(section_items)
-            self.stats['by_section'][section_slug] = len(section_items)
+            section_items = self._scrape_section(
+                url_slug, table, display_name, extra_fields, global_ids
+            )
             
-            print(f"✅ {len(section_items)} itens coletados")
+            items_by_table[table].extend(section_items)
+            self.stats['by_section'][url_slug] = len(section_items)
+            self.stats['by_table'][table] += len(section_items)
             
-            # Delay entre seções
+            print(f"✅ {len(section_items)} itens → {table}")
+            
             time.sleep(2)
         
-        self.stats['total_scraped'] = len(all_items)
-        return all_items
+        self.stats['total_scraped'] = sum(len(items) for items in items_by_table.values())
+        return items_by_table
     
-    def _scrape_section(self, section_slug: str, section_name: str, extra_fields: dict, global_ids: set) -> List[dict]:
-        """Scrape uma seção completa do Superbid via API"""
+    def _scrape_section(self, url_slug: str, table: str, 
+                       display_name: str, extra_fields: dict, 
+                       global_ids: set) -> List[dict]:
+        """Scrape uma seção específica via API"""
         items = []
         page_num = 1
         page_size = 100
@@ -117,31 +183,27 @@ class SuperbidScraper:
             print(f"  Pág {page_num}", end='', flush=True)
             
             try:
-                # Parâmetros da API (baseado no código que funcionava)
+                # Parâmetros da API Superbid
                 params = {
-                    "urlSeo": f"https://exchange.superbid.net/categorias/{section_slug}",
+                    "urlSeo": f"https://exchange.superbid.net/categorias/{url_slug}",
                     "locale": "pt_BR",
-                    "orderBy": "offerDetail.percentDiffReservedPriceOverFipePrice:asc",
+                    "orderBy": "score:desc",
                     "pageNumber": page_num,
                     "pageSize": page_size,
                     "portalId": "[2,15]",
-                    "preOrderBy": "orderByFirstOpenedOffersAndSecondHasPhoto",
                     "requestOrigin": "marketplace",
                     "searchType": "openedAll",
                     "timeZoneId": "America/Sao_Paulo",
                 }
                 
-                # Request na API
                 response = self.session.get(
                     self.base_url,
                     params=params,
-                    headers=self.headers,
                     timeout=45
                 )
                 
-                # Tratamento de erros
                 if response.status_code == 404:
-                    print(f" ⚪ Fim (404)")
+                    print(f" ⚪ Fim")
                     break
                 
                 if response.status_code != 200:
@@ -162,7 +224,7 @@ class SuperbidScraper:
                 duplicados = 0
                 
                 for offer in offers:
-                    item = self._extract_offer(offer, section_slug, section_name, extra_fields)
+                    item = self._extract_offer(offer, table, display_name, extra_fields)
                     
                     if not item:
                         continue
@@ -178,14 +240,13 @@ class SuperbidScraper:
                     novos += 1
                 
                 if novos > 0:
-                    print(f" ✅ +{novos} | Total seção: {len(items)}")
+                    print(f" ✅ +{novos}")
                     consecutive_errors = 0
                 else:
                     print(f" ⚪ 0 novos (dup: {duplicados})")
                 
                 # Verifica se é última página
                 if len(offers) < page_size:
-                    print("  ✅ Última página")
                     break
                 
                 page_num += 1
@@ -205,12 +266,9 @@ class SuperbidScraper:
         
         return items
     
-    def _extract_offer(self, offer: dict, section_slug: str, section_name: str, extra_fields: dict) -> Optional[dict]:
-        """
-        Extrai dados da oferta Superbid.
-        NÃO decide categoria final - apenas coleta dados brutos.
-        Mantém vehicle_type quando disponível (veículos).
-        """
+    def _extract_offer(self, offer: dict, table: str, 
+                      display_name: str, extra_fields: dict) -> Optional[dict]:
+        """Extrai dados da oferta Superbid"""
         try:
             # Estrutura da resposta da API
             product = offer.get("product", {})
@@ -231,15 +289,14 @@ class SuperbidScraper:
             if not title or len(title) < 3:
                 return None
             
-            # Descrição completa
-            full_desc = offer.get("offerDescription", {}).get("offerDescription", "")
-            description_preview = full_desc[:200] if full_desc else title[:200]
+            # Descrição
+            description = offer.get("offerDescription", {}).get("offerDescription", "")
             
             # Valor
             value = detail.get("currentMinBid") or detail.get("initialBidValue")
             value_text = detail.get("currentMinBidFormatted") or detail.get("initialBidValueFormatted")
             
-            # Localização (formato: "Cidade/UF" ou "Cidade - UF")
+            # Localização
             city = None
             state = None
             seller_city = seller.get("city", "") or ""
@@ -253,10 +310,6 @@ class SuperbidScraper:
                 city = parts[0].strip()
                 state = parts[1].strip() if len(parts) > 1 else None
             
-            # Valida UF
-            if state and (len(state) != 2 or not state.isupper()):
-                state = None
-            
             # Link
             link = f"https://exchange.superbid.net/oferta/{offer_id}"
             
@@ -265,50 +318,48 @@ class SuperbidScraper:
             end_date_str = offer.get("endDate")
             if end_date_str:
                 try:
-                    auction_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                    # Formato ISO: "2025-01-15T15:00:00Z"
+                    auction_date = end_date_str.replace('Z', ' ').replace('T', ' ').strip()
                 except:
                     pass
             
-            # ✅ MONTA ITEM BASE - SEM DECIDIR CATEGORIA
+            # Monta item base
             item = {
                 'source': 'superbid',
                 'external_id': external_id,
                 'title': title,
-                'description': full_desc,
-                'description_preview': description_preview,
+                'description': description,
                 'value': value,
                 'value_text': value_text,
                 'city': city,
                 'state': state,
                 'link': link,
+                'target_table': table,  # ✅ Tabela de destino já definida
                 
-                # Categoria ORIGINAL do site (só metadata, não decisão)
-                'raw_category': section_slug,
+                'auction_date': auction_date,
+                'auction_type': auction.get("modalityDesc"),
+                'auction_name': auction.get("desc"),
+                'store_name': store.get("name"),
+                'lot_number': offer.get("lotNumber"),
+                
+                'total_visits': offer.get("visits", 0),
+                'total_bids': offer.get("totalBids", 0),
+                'total_bidders': offer.get("totalBidders", 0),
                 
                 'metadata': {
-                    'secao_site': section_name,
-                    'secao_slug': section_slug,
-                    'leilao_tipo': auction.get("modalityDesc"),
-                    'leilao_nome': auction.get("desc"),
+                    'secao_site': display_name,
                     'leiloeiro': auction.get("auctioneer"),
-                    'loja_nome': store.get("name"),
                     'vendedor': seller.get("name"),
-                    'lote_numero': offer.get("lotNumber"),
-                    'total_visitas': offer.get("visits", 0),
-                    'total_lances': offer.get("totalBids", 0),
-                    'total_participantes': offer.get("totalBidders", 0),
-                    'data_leilao': auction_date.isoformat() if auction_date else None,
                 }
             }
             
-            # ✅ ADICIONA VEHICLE_TYPE APENAS PARA VEÍCULOS
-            # Isso ajuda os handlers de busca, mas NÃO define a tabela final
-            if 'vehicle_type' in extra_fields:
-                item['vehicle_type'] = extra_fields['vehicle_type']
+            # Adiciona campos extras (vehicle_type, property_type, etc.)
+            if extra_fields:
+                item.update(extra_fields)
             
             # Filtra itens de teste/demo
             store_name = str(store.get("name", "")).lower()
-            if not store.get("name") or 'demo' in store_name or 'test' in store_name:
+            if 'demo' in store_name or 'test' in store_name:
                 return None
             
             # Valor muito baixo (suspeito)
@@ -318,14 +369,13 @@ class SuperbidScraper:
             return item
             
         except Exception as e:
-            # Silencioso - não loga cada erro de parsing
             return None
 
 
 def main():
     """Execução principal"""
     print("\n" + "="*70)
-    print("🚀 SUPERBID - SCRAPER COMPLETO DO DOMÍNIO")
+    print("🚀 SUPERBID - SCRAPER SIMPLIFICADO")
     print("="*70)
     print(f"📅 Início: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
@@ -337,12 +387,14 @@ def main():
     # ========================================
     print("\n🔥 FASE 1: COLETANDO DADOS")
     scraper = SuperbidScraper()
-    items = scraper.scrape()
+    items_by_table = scraper.scrape()
     
-    print(f"\n✅ Total coletado: {len(items)} itens")
-    print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
+    total_items = sum(len(items) for items in items_by_table.values())
     
-    if not items:
+    print(f"\n✅ Total coletado: {total_items} itens")
+    print(f"📄 Duplicatas filtradas: {scraper.stats['duplicates']}")
+    
+    if not total_items:
         print("⚠️ Nenhum item coletado - encerrando")
         return
     
@@ -350,59 +402,36 @@ def main():
     # FASE 2: NORMALIZAÇÃO
     # ========================================
     print("\n✨ FASE 2: NORMALIZANDO DADOS")
-    try:
-        normalized_items = normalize_items(items)
-        print(f"✅ {len(normalized_items)} itens normalizados")
-    except Exception as e:
-        print(f"⚠️ Erro na normalização: {e}")
-        print("Usando dados brutos...")
-        normalized_items = items
     
-    # Salva JSON normalizado (para debug)
+    normalized_by_table = {}
+    
+    for table, items in items_by_table.items():
+        if not items:
+            continue
+        
+        try:
+            normalized = normalize_items(items)
+            normalized_by_table[table] = normalized
+            print(f"  ✅ {table}: {len(normalized)} itens normalizados")
+        except Exception as e:
+            print(f"  ⚠️ Erro em {table}: {e}")
+            normalized_by_table[table] = items
+    
+    # Salva JSON normalizado (debug)
     output_dir = Path(__file__).parent / 'data' / 'normalized'
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     json_file = output_dir / f'superbid_{timestamp}.json'
     
     with open(json_file, 'w', encoding='utf-8') as f:
-        json.dump(normalized_items, f, ensure_ascii=False, indent=2)
+        json.dump(normalized_by_table, f, ensure_ascii=False, indent=2)
     print(f"💾 JSON salvo: {json_file}")
     
     # ========================================
-    # FASE 3: CLASSIFICAÇÃO GROQ
+    # FASE 3: INSERT NO SUPABASE
     # ========================================
-    print("\n🤖 FASE 3: CLASSIFICANDO COM GROQ AI")
-    try:
-        classifier = GroqTableClassifier()
-        items_by_table = defaultdict(list)
-        
-        for i, item in enumerate(normalized_items, 1):
-            if i % 10 == 0:
-                print(f"  ⏳ {i}/{len(normalized_items)}")
-            
-            table = classifier.classify(item)
-            if table:
-                items_by_table[table].append(item)
-            
-            time.sleep(0.2)  # Rate limit Groq
-        
-        print(f"✅ Classificação concluída!")
-        print(f"\n📊 Distribuição por tabela:")
-        for table, table_items in sorted(items_by_table.items()):
-            print(f"  • {table}: {len(table_items)} itens")
-        
-        # Print stats do classifier
-        classifier.print_stats()
+    print("\n📤 FASE 3: INSERINDO NO SUPABASE")
     
-    except Exception as e:
-        print(f"⚠️ Erro na classificação: {e}")
-        print("Colocando tudo em 'oportunidades'...")
-        items_by_table = {'oportunidades': normalized_items}
-    
-    # ========================================
-    # FASE 4: INSERT NO SUPABASE
-    # ========================================
-    print("\n📤 FASE 4: INSERINDO NO SUPABASE")
     try:
         supabase = SupabaseClient()
         
@@ -412,12 +441,12 @@ def main():
             total_inserted = 0
             total_updated = 0
             
-            for table, table_items in items_by_table.items():
-                if not table_items:
+            for table, items in normalized_by_table.items():
+                if not items:
                     continue
                 
-                print(f"\n  📤 Tabela '{table}': {len(table_items)} itens")
-                stats = supabase.upsert(table, table_items)
+                print(f"\n  📤 Tabela '{table}': {len(items)} itens")
+                stats = supabase.upsert(table, items)
                 
                 print(f"    ✅ Inseridos: {stats['inserted']}")
                 print(f"    🔄 Atualizados: {stats['updated']}")
@@ -444,10 +473,10 @@ def main():
     print("\n" + "="*70)
     print("📊 ESTATÍSTICAS FINAIS")
     print("="*70)
-    print(f"🔵 Superbid - Domínio Completo:")
-    print(f"\n  Por Seção do Site:")
-    for section, count in sorted(scraper.stats['by_section'].items()):
-        print(f"    • {section}: {count} itens")
+    print(f"🔵 Superbid - Scraper Simplificado:")
+    print(f"\n  Por Tabela:")
+    for table, count in sorted(scraper.stats['by_table'].items()):
+        print(f"    • {table}: {count} itens")
     print(f"\n  • Total coletado: {scraper.stats['total_scraped']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
     print(f"\n⏱️ Duração: {minutes}min {seconds}s")
