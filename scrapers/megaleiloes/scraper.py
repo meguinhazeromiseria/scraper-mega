@@ -177,7 +177,7 @@ class MegaLeiloesScraper:
         items = []
         page_num = 1
         consecutive_empty = 0
-        max_empty = 3
+        max_empty = 2  # ✅ Reduzido de 3 para 2
         max_pages = 50
         
         while page_num <= max_pages and consecutive_empty < max_empty:
@@ -203,11 +203,10 @@ class MegaLeiloesScraper:
                 # Seletor de cards
                 cards = soup.select('div.card, .leilao-card, div[class*="card"]')
                 
+                # ✅ Se página realmente vazia (0 cards), para imediatamente
                 if not cards:
-                    print(f" ⚪ Sem cards")
-                    consecutive_empty += 1
-                    page_num += 1
-                    continue
+                    print(f" ⚪ Vazia (0 cards) - parando")
+                    break
                 
                 novos = 0
                 duplicados = 0
@@ -232,6 +231,7 @@ class MegaLeiloesScraper:
                     print(f" ✅ +{novos}")
                     consecutive_empty = 0
                 else:
+                    # ✅ Tem cards mas todos são duplicatas
                     print(f" ⚪ 0 novos (dup: {duplicados})")
                     consecutive_empty += 1
                 
@@ -495,7 +495,7 @@ def main():
     total_items = sum(len(items) for items in items_by_table.values())
     
     print(f"\n✅ Total coletado: {total_items} itens")
-    print(f"📄 Duplicatas filtradas: {scraper.stats['duplicates']}")
+    print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
     
     if not total_items:
         print("⚠️ Nenhum item coletado - encerrando")
