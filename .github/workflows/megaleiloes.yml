@@ -4,10 +4,10 @@ on:
   # Execução manual
   workflow_dispatch:
   
-  # Cron automático - UMA VEZ POR SEMANA
+  # Cron automático - DUAS VEZES POR MÊS
   schedule:
-    # Toda quarta-feira às 6h UTC (3h da manhã no Brasil)
-    - cron: '0 6 * * 3'
+    # Dia 1 e dia 15 de cada mês às 5h UTC (2h da madrugada no Brasil)
+    - cron: '0 5 1,15 * *'
 
 jobs:
   megaleiloes-scraper:
@@ -78,8 +78,8 @@ jobs:
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "**Modo:** Manual" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**Modo:** Cron (automático semanal)" >> $GITHUB_STEP_SUMMARY
-            echo "**Frequência:** Toda quarta-feira às 6h UTC (3h BRT)" >> $GITHUB_STEP_SUMMARY
+            echo "**Modo:** Cron (automático quinzenal)" >> $GITHUB_STEP_SUMMARY
+            echo "**Frequência:** Dias 1 e 15 de cada mês às 5h UTC (2h BRT)" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
