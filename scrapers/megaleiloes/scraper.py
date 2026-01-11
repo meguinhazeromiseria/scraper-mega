@@ -13,6 +13,7 @@ import random
 import re
 from pathlib import Path
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
@@ -25,6 +26,18 @@ from normalizer import normalize_items
 # Imports do scraper
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+
+
+def convert_brazilian_datetime_to_postgres(date_str: str) -> str:
+    """Converte data brasileira DD/MM/YYYY HH:MM para PostgreSQL ISO format"""
+    try:
+        date_str = date_str.replace('às', '').strip()
+        dt = datetime.strptime(date_str, '%d/%m/%Y %H:%M')
+        dt_with_tz = dt.replace(tzinfo=ZoneInfo('America/Sao_Paulo'))
+        return dt_with_tz.isoformat()
+    except Exception as e:
+        print(f"    ⚠️ Erro ao converter data '{date_str}': {e}")
+        return None
 
 
 class MegaLeiloesScraper:
@@ -91,10 +104,7 @@ class MegaLeiloesScraper:
         }
     
     def scrape(self) -> dict:
-        """
-        Scrape completo do MegaLeilões
-        Returns: dict com items agrupados por tabela
-        """
+        """Scrape completo do MegaLeilões"""
         print("\n" + "="*60)
         print("🟢 MEGALEILÕES - SCRAPER SIMPLIFICADO")
         print("="*60)
@@ -102,7 +112,6 @@ class MegaLeiloesScraper:
         items_by_table = defaultdict(list)
         global_ids = set()
         
-        # Captura cookies primeiro
         cookies_raw = self._get_cookies()
         
         try:
@@ -120,7 +129,6 @@ class MegaLeiloesScraper:
                 
                 page = context.new_page()
                 
-                # Varre cada seção
                 for url_path, table, display_name, extra_fields in self.sections:
                     print(f"\n📦 {display_name} → {table}")
                     
@@ -181,7 +189,6 @@ class MegaLeiloesScraper:
         max_pages = 50
         
         while page_num <= max_pages and consecutive_empty < max_empty:
-            # Monta URL
             if page_num == 1:
                 url = f"{self.base_url}/{url_path}"
             else:
@@ -193,17 +200,14 @@ class MegaLeiloesScraper:
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 time.sleep(random.uniform(3, 5))
                 
-                # Scroll para carregar conteúdo lazy
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 time.sleep(2)
                 
                 html = page.content()
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                # Seletor de cards
                 cards = soup.select('div.card, .leilao-card, div[class*="card"]')
                 
-                # Se página realmente vazia (0 cards), para imediatamente
                 if not cards:
                     print(f" ⚪ Vazia (0 cards) - parando")
                     break
@@ -217,7 +221,6 @@ class MegaLeiloesScraper:
                     if not item:
                         continue
                     
-                    # Verifica duplicata
                     if item['external_id'] in global_ids:
                         duplicados += 1
                         self.stats['duplicates'] += 1
@@ -246,9 +249,8 @@ class MegaLeiloesScraper:
     
     def _extract_card(self, card, table: str, display_name: str, 
                      extra_fields: dict) -> Optional[dict]:
-        """Extrai dados do card - dados limpos, sem decidir categoria"""
+        """Extrai dados do card"""
         try:
-            # Link
             link_elem = card.select_one('a[href]')
             if not link_elem:
                 return None
@@ -257,14 +259,11 @@ class MegaLeiloesScraper:
             if not link or 'javascript' in link:
                 return None
             
-            # Normaliza link
             if not link.startswith('http'):
                 link = f"{self.base_url}{link}"
             
-            # Valida se é link de item (não de listagem)
             link_clean = link.rstrip('/')
             
-            # Evita links de categorias/listagens
             invalid_endings = [
                 '/imoveis', '/veiculos', '/bens-de-consumo', '/industrial', 
                 '/animais', '/outros', '/carros', '/motos', '/apartamentos'
@@ -273,7 +272,6 @@ class MegaLeiloesScraper:
             if any(link_clean.endswith(ending) for ending in invalid_endings):
                 return None
             
-            # Extrai ID do item
             external_id = None
             parts = link.rstrip('/').split('/')
             for part in reversed(parts):
@@ -284,10 +282,8 @@ class MegaLeiloesScraper:
             if not external_id or external_id == 'megaleiloes_':
                 return None
             
-            # Texto do card
             texto = card.get_text(separator=' ', strip=True)
             
-            # Filtra cards de UI/paginação
             texto_lower = texto.lower()
             if 'exibindo' in texto_lower and 'itens' in texto_lower:
                 return None
@@ -295,17 +291,14 @@ class MegaLeiloesScraper:
             if len(texto) < 10:
                 return None
             
-            # Título (primeiros 150 chars)
             title = texto[:150].strip() if texto else f"Item {display_name}"
             
             # ✅ EXTRAI INFORMAÇÕES DE PRAÇA DO HTML
             auction_info = self._extract_auction_info_from_html(card)
             
-            # Preço (usa preço da praça ativa se disponível)
             value = auction_info.get('current_value')
             value_text = auction_info.get('current_value_text')
             
-            # Fallback para preço no texto se não encontrou nas divs
             if not value:
                 price_match = re.search(r'R\$\s*([\d.]+,\d{2})', texto)
                 if price_match:
@@ -315,7 +308,6 @@ class MegaLeiloesScraper:
                     except:
                         pass
             
-            # Estado
             state = None
             state_match = re.search(r'\b([A-Z]{2})\b', texto)
             if state_match:
@@ -325,13 +317,11 @@ class MegaLeiloesScraper:
                 if uf in valid_states:
                     state = uf
             
-            # Cidade
             city = None
             city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú\s]+)\s*[-–/,]\s*[A-Z]{2}', texto)
             if city_match:
                 city = city_match.group(1).strip()
             
-            # Monta item base
             item = {
                 'source': 'megaleiloes',
                 'external_id': external_id,
@@ -356,7 +346,6 @@ class MegaLeiloesScraper:
                 }
             }
             
-            # Adiciona campos extras (vehicle_type, property_type, animal_type)
             if extra_fields:
                 item.update(extra_fields)
             
@@ -366,16 +355,7 @@ class MegaLeiloesScraper:
             return None
     
     def _extract_auction_info_from_html(self, card) -> dict:
-        """
-        ✅ Extrai informações de praça dos elementos HTML do card
-        
-        Busca por:
-        - <div class="instance first passed"> → 1ª praça (já passou)
-        - <div class="instance active"> → 2ª praça (ativa) ou 1ª praça ativa
-        - .card-first-instance-date → data da 1ª praça
-        - .card-second-instance-date → data da 2ª praça
-        - .card-instance-value → valores
-        """
+        """✅ Extrai informações de praça COM CONVERSÃO DE DATA CORRIGIDA"""
         info = {
             'auction_round': None,
             'auction_date': None,
@@ -386,39 +366,33 @@ class MegaLeiloesScraper:
             'discount_percentage': None,
         }
         
-        # Busca praça ativa
         active_instance = card.select_one('.instance.active')
         
         if active_instance:
-            # Verifica se é 2ª praça
             second_date = active_instance.select_one('.card-second-instance-date')
-            # Verifica se é 1ª praça
             first_date = active_instance.select_one('.card-first-instance-date')
             
             if second_date:
-                # 2ª praça ativa
                 info['auction_round'] = 2
                 date_text = second_date.get_text(strip=True)
                 date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
                 if date_match:
-                    info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+                    date_str = f"{date_match.group(1)} {date_match.group(2)}"
+                    info['auction_date'] = convert_brazilian_datetime_to_postgres(date_str)
                 
             elif first_date:
-                # 1ª praça ativa ou praça única
                 info['auction_round'] = 1
                 date_text = first_date.get_text(strip=True)
-                # Extrai data do formato "Data: 12/01/2026 às 10:00"
                 date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
                 if date_match:
-                    info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+                    date_str = f"{date_match.group(1)} {date_match.group(2)}"
+                    info['auction_date'] = convert_brazilian_datetime_to_postgres(date_str)
             
-            # Valor da praça ativa
             value_elem = active_instance.select_one('.card-instance-value')
             if value_elem:
                 value_text = value_elem.get_text(strip=True)
                 info['current_value_text'] = value_text
                 
-                # Parse valor
                 value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
                 if value_match:
                     try:
@@ -426,18 +400,16 @@ class MegaLeiloesScraper:
                     except:
                         pass
         
-        # Busca 1ª praça (se já passou e agora está na 2ª)
         first_instance = card.select_one('.instance.first.passed')
         if first_instance:
-            # Data da 1ª praça
             date_elem = first_instance.select_one('.card-first-instance-date')
             if date_elem:
                 date_text = date_elem.get_text(strip=True)
                 date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
                 if date_match:
-                    info['first_round_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+                    date_str = f"{date_match.group(1)} {date_match.group(2)}"
+                    info['first_round_date'] = convert_brazilian_datetime_to_postgres(date_str)
             
-            # Valor da 1ª praça
             value_elem = first_instance.select_one('.card-instance-value')
             if value_elem:
                 value_text = value_elem.get_text(strip=True)
@@ -448,7 +420,6 @@ class MegaLeiloesScraper:
                     except:
                         pass
         
-        # Calcula desconto se temos ambos os valores
         if info['first_round_value'] and info['current_value'] and info['auction_round'] == 2:
             try:
                 discount = ((info['first_round_value'] - info['current_value']) / info['first_round_value']) * 100
@@ -469,9 +440,6 @@ def main():
     
     start_time = time.time()
     
-    # ========================================
-    # FASE 1: SCRAPE
-    # ========================================
     print("\n🔥 FASE 1: COLETANDO DADOS")
     scraper = MegaLeiloesScraper()
     items_by_table = scraper.scrape()
@@ -485,9 +453,6 @@ def main():
         print("⚠️ Nenhum item coletado - encerrando")
         return
     
-    # ========================================
-    # FASE 2: NORMALIZAÇÃO
-    # ========================================
     print("\n✨ FASE 2: NORMALIZANDO DADOS")
     
     normalized_by_table = {}
@@ -504,7 +469,6 @@ def main():
             print(f"  ⚠️ Erro em {table}: {e}")
             normalized_by_table[table] = items
     
-    # Salva JSON normalizado (debug)
     output_dir = Path(__file__).parent / 'data' / 'normalized'
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -514,9 +478,6 @@ def main():
         json.dump(normalized_by_table, f, ensure_ascii=False, indent=2)
     print(f"💾 JSON salvo: {json_file}")
     
-    # ========================================
-    # FASE 3: INSERT NO SUPABASE
-    # ========================================
     print("\n📤 FASE 3: INSERINDO NO SUPABASE")
     
     try:
@@ -550,9 +511,6 @@ def main():
     except Exception as e:
         print(f"⚠️ Erro no Supabase: {e}")
     
-    # ========================================
-    # ESTATÍSTICAS FINAIS
-    # ========================================
     elapsed = time.time() - start_time
     minutes = int(elapsed // 60)
     seconds = int(elapsed % 60)
