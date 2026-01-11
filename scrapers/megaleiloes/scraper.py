@@ -177,7 +177,7 @@ class MegaLeiloesScraper:
         items = []
         page_num = 1
         consecutive_empty = 0
-        max_empty = 2  # ✅ Reduzido de 3 para 2
+        max_empty = 2
         max_pages = 50
         
         while page_num <= max_pages and consecutive_empty < max_empty:
@@ -203,7 +203,7 @@ class MegaLeiloesScraper:
                 # Seletor de cards
                 cards = soup.select('div.card, .leilao-card, div[class*="card"]')
                 
-                # ✅ Se página realmente vazia (0 cards), para imediatamente
+                # Se página realmente vazia (0 cards), para imediatamente
                 if not cards:
                     print(f" ⚪ Vazia (0 cards) - parando")
                     break
@@ -231,7 +231,6 @@ class MegaLeiloesScraper:
                     print(f" ✅ +{novos}")
                     consecutive_empty = 0
                 else:
-                    # ✅ Tem cards mas todos são duplicatas
                     print(f" ⚪ 0 novos (dup: {duplicados})")
                     consecutive_empty += 1
                 
@@ -343,7 +342,7 @@ class MegaLeiloesScraper:
                 'city': city,
                 'state': state,
                 'link': link,
-                'target_table': table,  # ✅ Tabela de destino já definida
+                'target_table': table,
                 
                 # ✅ Informações de praça extraídas do HTML
                 'auction_round': auction_info.get('auction_round'),
@@ -372,7 +371,7 @@ class MegaLeiloesScraper:
         
         Busca por:
         - <div class="instance first passed"> → 1ª praça (já passou)
-        - <div class="instance active"> → 2ª praça (ativa)
+        - <div class="instance active"> → 2ª praça (ativa) ou 1ª praça ativa
         - .card-first-instance-date → data da 1ª praça
         - .card-second-instance-date → data da 2ª praça
         - .card-instance-value → valores
@@ -391,56 +390,41 @@ class MegaLeiloesScraper:
         active_instance = card.select_one('.instance.active')
         
         if active_instance:
-            # Determina qual praça está ativa
-            if active_instance.select_one('.card-second-instance-date'):
-                info['auction_round'] = 2
-                
-                # Data da 2ª praça
-                date_elem = active_instance.select_one('.card-second-instance-date')
-                if date_elem:
-                    date_text = date_elem.get_text(strip=True)
-                    # Extrai data: "2ª Praça: 07/01/2026 às 15:02"
-                    date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
-                    if date_match:
-                        info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
-                
-                # Valor da 2ª praça
-                value_elem = active_instance.select_one('.card-instance-value')
-                if value_elem:
-                    value_text = value_elem.get_text(strip=True)
-                    info['current_value_text'] = value_text
-                    
-                    # Parse valor
-                    value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
-                    if value_match:
-                        try:
-                            info['current_value'] = float(value_match.group(1).replace('.', '').replace(',', '.'))
-                        except:
-                            pass
+            # Verifica se é 2ª praça
+            second_date = active_instance.select_one('.card-second-instance-date')
+            # Verifica se é 1ª praça
+            first_date = active_instance.select_one('.card-first-instance-date')
             
-            elif active_instance.select_one('.card-first-instance-date'):
+            if second_date:
+                # 2ª praça ativa
+                info['auction_round'] = 2
+                date_text = second_date.get_text(strip=True)
+                date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
+                if date_match:
+                    info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+                
+            elif first_date:
+                # 1ª praça ativa ou praça única
                 info['auction_round'] = 1
+                date_text = first_date.get_text(strip=True)
+                # Extrai data do formato "Data: 12/01/2026 às 10:00"
+                date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
+                if date_match:
+                    info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
+            
+            # Valor da praça ativa
+            value_elem = active_instance.select_one('.card-instance-value')
+            if value_elem:
+                value_text = value_elem.get_text(strip=True)
+                info['current_value_text'] = value_text
                 
-                # Data da 1ª praça
-                date_elem = active_instance.select_one('.card-first-instance-date')
-                if date_elem:
-                    date_text = date_elem.get_text(strip=True)
-                    date_match = re.search(r'(\d{2}/\d{2}/\d{4})\s*às\s*(\d{2}:\d{2})', date_text)
-                    if date_match:
-                        info['auction_date'] = f"{date_match.group(1)} {date_match.group(2)}"
-                
-                # Valor da 1ª praça
-                value_elem = active_instance.select_one('.card-instance-value')
-                if value_elem:
-                    value_text = value_elem.get_text(strip=True)
-                    info['current_value_text'] = value_text
-                    
-                    value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
-                    if value_match:
-                        try:
-                            info['current_value'] = float(value_match.group(1).replace('.', '').replace(',', '.'))
-                        except:
-                            pass
+                # Parse valor
+                value_match = re.search(r'R\$\s*([\d.]+,\d{2})', value_text)
+                if value_match:
+                    try:
+                        info['current_value'] = float(value_match.group(1).replace('.', '').replace(',', '.'))
+                    except:
+                        pass
         
         # Busca 1ª praça (se já passou e agora está na 2ª)
         first_instance = card.select_one('.instance.first.passed')
