@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 SUPABASE CLIENT - Genérico para todas as tabelas
-Suporta campos especiais: vehicle_type, property_type, animal_type
+Suporta campos especiais: vehicle_type, property_type, animal_type, etc.
+✅ CORRIGIDO: Apenas colunas que existem no schema
 """
 
 import os
@@ -94,21 +95,16 @@ class SupabaseClient:
         if not items:
             return items
         
-        # Campos padrão presentes em TODAS as tabelas
+        # ✅ Campos padrão presentes em TODAS as tabelas (baseado no schema real)
         standard_fields = {
             'source', 'external_id', 'title', 'normalized_title', 'description_preview',
             'description', 'value', 'value_text', 'city', 'state', 'address',
-            'auction_date', 'days_remaining', 'auction_type', 'auction_name',
-            'store_name', 'lot_number', 'total_visits', 'total_bids', 'total_bidders',
-            'link', 'metadata', 'duplicate_group', 'is_primary_duplicate',
-            'is_active', 'created_at', 'updated_at', 'last_scraped_at',
-            'market_price', 'market_price_source', 'market_price_updated_at',
-            'market_price_confidence', 'market_price_metadata',
-            # ✅ Novos campos de praça
-            'auction_round', 'discount_percentage', 'first_round_value', 'first_round_date'
+            'auction_date', 'auction_type', 'auction_name', 'store_name', 'lot_number',
+            'total_visits', 'total_bids', 'total_bidders', 'link', 'metadata',
+            'is_active', 'created_at', 'updated_at', 'last_scraped_at', 'auction_round'
         }
         
-        # Campos específicos por tabela
+        # ✅ Campos específicos por tabela (baseado no schema real)
         table_specific_fields = {
             'veiculos': {'vehicle_type'},
             'imoveis': {'property_type'},
@@ -183,7 +179,7 @@ class SupabaseClient:
         if not isinstance(metadata, dict):
             metadata = {}
         
-        # ✅ Campos padrão (presentes em TODAS as tabelas)
+        # ✅ Campos padrão (presentes em TODAS as tabelas segundo schema real)
         data = {
             'source': str(source),
             'external_id': str(external_id),
@@ -197,7 +193,6 @@ class SupabaseClient:
             'state': state,
             'address': str(item.get('address')) if item.get('address') else None,
             'auction_date': auction_date,
-            'days_remaining': int(item.get('days_remaining', 0)) if item.get('days_remaining') is not None else None,
             'auction_type': str(item.get('auction_type', 'Leilão'))[:100],
             'auction_name': str(item.get('auction_name')) if item.get('auction_name') else None,
             'store_name': str(item.get('store_name')) if item.get('store_name') else None,
@@ -209,38 +204,29 @@ class SupabaseClient:
             'metadata': metadata,
             'is_active': True,
             'last_scraped_at': datetime.now().isoformat(),
-            # ✅ Informações de praça
+            # ✅ Informações de praça (existe em todas as tabelas)
             'auction_round': int(item.get('auction_round')) if item.get('auction_round') is not None else None,
-            'discount_percentage': float(item.get('discount_percentage')) if item.get('discount_percentage') is not None else None,
-            'first_round_value': float(item.get('first_round_value')) if item.get('first_round_value') is not None else None,
-            'first_round_date': str(item.get('first_round_date')) if item.get('first_round_date') else None,
         }
         
         # ✅ Campos específicos por tabela
         if tabela == 'veiculos':
-            # Tenta pegar do root primeiro, depois do metadata
             vehicle_type = item.get('vehicle_type')
             if not vehicle_type and isinstance(metadata, dict):
                 vehicle_type = metadata.get('vehicle_type')
-            
             if vehicle_type:
                 data['vehicle_type'] = str(vehicle_type)[:255]
         
         if tabela == 'imoveis':
-            # Property type para imóveis
             property_type = item.get('property_type')
             if not property_type and isinstance(metadata, dict):
                 property_type = metadata.get('property_type')
-            
             if property_type:
                 data['property_type'] = str(property_type)[:255]
         
         if tabela == 'animais':
-            # Animal type para animais
             animal_type = item.get('animal_type')
             if not animal_type and isinstance(metadata, dict):
                 animal_type = metadata.get('animal_type')
-            
             if animal_type:
                 data['animal_type'] = str(animal_type)[:255]
         
@@ -249,60 +235,48 @@ class SupabaseClient:
             multiplecategory = item.get('multiplecategory')
             if not multiplecategory and isinstance(metadata, dict):
                 multiplecategory = metadata.get('multiplecategory')
-            
             if multiplecategory and isinstance(multiplecategory, list):
                 data['multiplecategory'] = multiplecategory
             
-            # Tech type (novo campo adicional)
+            # Tech type
             tech_type = item.get('tech_type')
             if not tech_type and isinstance(metadata, dict):
                 tech_type = metadata.get('tech_type')
-            
             if tech_type:
                 data['tech_type'] = str(tech_type)[:255]
         
         if tabela == 'bens_consumo':
-            # Consumption goods type
             consumption_goods_type = item.get('consumption_goods_type')
             if not consumption_goods_type and isinstance(metadata, dict):
                 consumption_goods_type = metadata.get('consumption_goods_type')
-            
             if consumption_goods_type:
                 data['consumption_goods_type'] = str(consumption_goods_type)[:255]
         
         if tabela == 'partes_pecas':
-            # Parts type
             parts_type = item.get('parts_type')
             if not parts_type and isinstance(metadata, dict):
                 parts_type = metadata.get('parts_type')
-            
             if parts_type:
                 data['parts_type'] = str(parts_type)[:255]
         
         if tabela == 'nichados':
-            # Specialized type
             specialized_type = item.get('specialized_type')
             if not specialized_type and isinstance(metadata, dict):
                 specialized_type = metadata.get('specialized_type')
-            
             if specialized_type:
                 data['specialized_type'] = str(specialized_type)[:255]
         
         if tabela == 'eletrodomesticos':
-            # Appliance type
             appliance_type = item.get('appliance_type')
             if not appliance_type and isinstance(metadata, dict):
                 appliance_type = metadata.get('appliance_type')
-            
             if appliance_type:
                 data['appliance_type'] = str(appliance_type)[:255]
         
         if tabela == 'materiais_construcao':
-            # Construction material type
             construction_material_type = item.get('construction_material_type')
             if not construction_material_type and isinstance(metadata, dict):
                 construction_material_type = metadata.get('construction_material_type')
-            
             if construction_material_type:
                 data['construction_material_type'] = str(construction_material_type)[:255]
         

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 NORMALIZER FORTALECIDO - Limpeza Avançada de Dados
+✅ CORRIGIDO: Remove campos que não existem no schema
 
 ✨ Recursos:
 - Extração de título limpo do external_id (MegaLeilões)
@@ -60,7 +61,7 @@ class UniversalNormalizer:
             'title': clean_title,
             'normalized_title': self._normalize_for_search(clean_title),
             
-            # Descrição limpa para análise (MANTÉM informações de praça)
+            # Descrição limpa para análise
             'description': clean_description,
             'description_preview': self._create_preview(clean_description, clean_title),
             
@@ -68,11 +69,8 @@ class UniversalNormalizer:
             'value': self._parse_value(item.get('value')),
             'value_text': item.get('value_text'),
             
-            # ✅ INFORMAÇÕES DE PRAÇA (vêm do HTML extraído no scraper)
+            # ✅ Informações de praça (campo que existe no schema)
             'auction_round': item.get('auction_round'),
-            'discount_percentage': item.get('discount_percentage'),
-            'first_round_value': self._parse_value(item.get('first_round_value')),
-            'first_round_date': item.get('first_round_date'),
             
             # Localização
             'city': self._clean_city(item.get('city')),
@@ -81,7 +79,6 @@ class UniversalNormalizer:
             
             # Leilão
             'auction_date': self._parse_date(item.get('auction_date')),
-            'days_remaining': self._parse_days_remaining(item.get('days_remaining')),
             'auction_type': self._clean_text(item.get('auction_type'), 'Leilão'),
             'auction_name': self._clean_text(item.get('auction_name')),
             'store_name': self._clean_text(item.get('store_name')),
@@ -95,10 +92,17 @@ class UniversalNormalizer:
             # Link
             'link': item.get('link'),
             
-            # Campos especiais (vehicle_type, property_type, animal_type)
+            # Campos especiais (vehicle_type, property_type, animal_type, etc.)
             'vehicle_type': item.get('vehicle_type'),
             'property_type': item.get('property_type'),
             'animal_type': item.get('animal_type'),
+            'appliance_type': item.get('appliance_type'),
+            'tech_type': item.get('tech_type'),
+            'consumption_goods_type': item.get('consumption_goods_type'),
+            'construction_material_type': item.get('construction_material_type'),
+            'parts_type': item.get('parts_type'),
+            'specialized_type': item.get('specialized_type'),
+            'multiplecategory': item.get('multiplecategory'),
             
             # Metadata
             'metadata': self._build_metadata(item),
@@ -154,7 +158,7 @@ class UniversalNormalizer:
         clean = str(title).strip()
         
         # Remove "LOTE XX" do início
-        clean = re.sub(r'^LOTE\s+\d+\s*[-:–—]?\s*', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'^LOTE\s+\d+\s*[-:—–]?\s*', '', clean, flags=re.IGNORECASE)
         
         # Remove HTML tags
         clean = re.sub(r'<[^>]+>', '', clean)
@@ -214,48 +218,34 @@ class UniversalNormalizer:
         if not words:
             return text
         
-        # Primeira palavra sempre maiúscula
-        result = [words[0].capitalize()]
+        result = []
         
-        # Demais palavras
-        for word in words[1:]:
+        for i, word in enumerate(words):
             word_lower = word.lower()
             
-            # Preserva siglas (ex: USB, HDMI)
-            if word.isupper() and len(word) <= 5:
-                result.append(word)
-            # Preposições e artigos em minúscula
+            # Primeira palavra sempre maiúscula
+            if i == 0:
+                result.append(word_lower.capitalize())
+            # Palavras pequenas ficam em minúscula
             elif word_lower in self.LOWERCASE_WORDS:
                 result.append(word_lower)
-            # Demais palavras: primeira maiúscula
+            # Outras palavras ficam com primeira letra maiúscula
             else:
-                result.append(word.capitalize())
+                result.append(word_lower.capitalize())
         
         return ' '.join(result)
     
-    def _deep_clean_description(self, description: Optional[str], remove_auction_info: bool = False) -> Optional[str]:
+    def _deep_clean_description(self, description: Optional[str], remove_auction_info: bool = True) -> Optional[str]:
         """
-        Limpeza PROFUNDA da descrição
-        remove_auction_info=False: MANTÉM informações de praça na descrição (contexto importante)
-        
-        - Remove HTML tags
-        - Remove espaços desnecessários
-        - Remove caracteres especiais
-        - Remove informações duplicadas
-        - Prepara para análise de IA
+        Limpeza PROFUNDA de descrição
+        remove_auction_info=True: Remove linhas com informações de praça (já capturadas)
         """
-        if not description:
+        if not description or not str(description).strip():
             return None
         
         desc = str(description).strip()
         
-        if not desc or len(desc) < 5:
-            return None
-        
-        # Remove HTML tags (preservando quebras de linha)
-        desc = re.sub(r'<br\s*/?>', '\n', desc, flags=re.IGNORECASE)
-        desc = re.sub(r'<p>', '\n\n', desc, flags=re.IGNORECASE)
-        desc = re.sub(r'</p>', '\n', desc, flags=re.IGNORECASE)
+        # Remove HTML tags
         desc = re.sub(r'<[^>]+>', '', desc)
         
         # Remove entidades HTML
@@ -264,39 +254,34 @@ class UniversalNormalizer:
         desc = desc.replace('&lt;', '<')
         desc = desc.replace('&gt;', '>')
         desc = desc.replace('&quot;', '"')
-        desc = re.sub(r'&#\d+;', '', desc)
         
-        # ✅ MANTÉM informações de praça na descrição (remove_auction_info=False por padrão)
+        # ✅ Remove informações de praça (já capturadas em campos próprios)
         if remove_auction_info:
-            desc = re.sub(r'\d+%\s*(?:abaixo|desconto|off)?\s*na\s*\d+[ªº]\s*pra[çc]a', '', desc, flags=re.IGNORECASE)
+            # Remove linhas inteiras com informações de praça
+            lines = desc.split('\n')
+            clean_lines = []
+            for line in lines:
+                # Pula linhas que falam de praça/desconto
+                if re.search(r'\d+[ªº]\s*pra[çc]a', line, re.IGNORECASE):
+                    continue
+                if re.search(r'\d+%\s*(?:abaixo|desconto|off)', line, re.IGNORECASE):
+                    continue
+                if re.search(r'primeira\s+pra[çc]a', line, re.IGNORECASE):
+                    continue
+                if re.search(r'segunda\s+pra[çc]a', line, re.IGNORECASE):
+                    continue
+                clean_lines.append(line)
+            desc = '\n'.join(clean_lines)
         
-        # Remove múltiplas quebras de linha (máximo 2)
-        desc = re.sub(r'\n\s*\n\s*\n+', '\n\n', desc)
+        # Remove espaços múltiplos e quebras de linha extras
+        desc = re.sub(r'\n\s*\n+', '\n', desc)
+        desc = re.sub(r' +', ' ', desc)
+        desc = desc.strip()
         
-        # Remove espaços múltiplos
-        desc = re.sub(r' {2,}', ' ', desc)
+        # Remove underscores
+        desc = desc.replace('_', ' ')
         
-        # Remove linhas vazias repetidas
-        lines = [line.strip() for line in desc.split('\n')]
-        lines = [line for line in lines if line]  # Remove linhas vazias
-        desc = '\n'.join(lines)
-        
-        # Remove informações redundantes comuns
-        desc = re.sub(r'Exibindo \d+ de \d+ itens', '', desc, flags=re.IGNORECASE)
-        
-        # Remove URLs soltas
-        desc = re.sub(r'https?://[^\s]+', '', desc)
-        
-        # Remove emails soltos
-        desc = re.sub(r'\S+@\S+', '', desc)
-        
-        # Remove telefones soltos
-        desc = re.sub(r'\(\d{2}\)\s*\d{4,5}-?\d{4}', '', desc)
-        
-        # Remove espaços extras após limpezas
-        desc = re.sub(r'\s+', ' ', desc).strip()
-        
-        # Limita tamanho (máximo 5000 chars para análise de IA)
+        # Limita tamanho
         if len(desc) > 5000:
             desc = desc[:4997] + '...'
         
@@ -416,19 +401,6 @@ class UniversalNormalizer:
         
         return None
     
-    def _parse_days_remaining(self, days) -> Optional[int]:
-        """Parse dias restantes"""
-        if days is None:
-            return None
-        
-        try:
-            days_int = int(days)
-            if days_int < 0:
-                return 0
-            return days_int
-        except:
-            return None
-    
     def _clean_text(self, text: Optional[str], default: Optional[str] = None) -> Optional[str]:
         """Limpa texto genérico"""
         if not text:
@@ -465,7 +437,9 @@ class UniversalNormalizer:
         # Campos extras vão pro metadata
         extra_fields = [
             'raw_category', 'condition', 'brand', 'model', 'year',
-            'quantity', 'unit_price'
+            'quantity', 'unit_price',
+            # Campos de praça que foram removidos do schema (preservar no metadata)
+            'discount_percentage', 'first_round_value', 'first_round_date'
         ]
         
         for field in extra_fields:
@@ -526,7 +500,7 @@ if __name__ == "__main__":
         print(f"   normalized_title: {normalized['normalized_title']}")
         print(f"   description (limpa): {normalized['description'][:80]}...")
         print(f"   auction_round: {normalized['auction_round']}")
-        print(f"   discount_percentage: {normalized['discount_percentage']}")
+        print(f"   metadata: {normalized['metadata']}")
         print("-" * 80)
     
     print("\n✅ Teste concluído!")
