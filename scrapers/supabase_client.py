@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SUPABASE CLIENT - Genérico para todas as tabelas
+SUPABASE CLIENT - Genérico para todas as tabelas (VERSÃO SIMPLIFICADA)
+✅ AJUSTADO: has_bid (boolean) ao invés de total_bids/total_bidders
+
 Suporta campos especiais: vehicle_type, property_type, animal_type, etc.
 ✅ CORRIGIDO: Apenas colunas que existem no schema
 """
@@ -95,12 +97,13 @@ class SupabaseClient:
         if not items:
             return items
         
-        # ✅ Campos padrão presentes em TODAS as tabelas (baseado no schema real)
+        # ✅ Campos padrão presentes em TODAS as tabelas (VERSÃO SIMPLIFICADA)
         standard_fields = {
             'source', 'external_id', 'title', 'normalized_title', 'description_preview',
             'description', 'value', 'value_text', 'city', 'state', 'address',
             'auction_date', 'auction_type', 'auction_name', 'store_name', 'lot_number',
-            'total_visits', 'total_bids', 'total_bidders', 'link', 'metadata',
+            'has_bid',  # ✅ Boolean ao invés de total_bids/total_bidders
+            'link', 'metadata',
             'is_active', 'created_at', 'updated_at', 'last_scraped_at', 'auction_round'
         }
         
@@ -175,11 +178,19 @@ class SupabaseClient:
             except:
                 value = None
         
+        # ✅ Processa has_bid (boolean)
+        has_bid = item.get('has_bid')
+        if has_bid is None:
+            has_bid = False
+        elif not isinstance(has_bid, bool):
+            # Converte para boolean se vier como string/int
+            has_bid = str(has_bid).lower() in ('true', '1', 'yes', 'sim')
+        
         metadata = item.get('metadata', {})
         if not isinstance(metadata, dict):
             metadata = {}
         
-        # ✅ Campos padrão (presentes em TODAS as tabelas segundo schema real)
+        # ✅ Campos padrão (VERSÃO SIMPLIFICADA - sem total_bids/total_bidders)
         data = {
             'source': str(source),
             'external_id': str(external_id),
@@ -197,13 +208,15 @@ class SupabaseClient:
             'auction_name': str(item.get('auction_name')) if item.get('auction_name') else None,
             'store_name': str(item.get('store_name')) if item.get('store_name') else None,
             'lot_number': str(item.get('lot_number')) if item.get('lot_number') else None,
-            'total_visits': int(item.get('total_visits', 0)),
-            'total_bids': int(item.get('total_bids', 0)),
-            'total_bidders': int(item.get('total_bidders', 0)),
+            
+            # ✅ VERSÃO SIMPLIFICADA: has_bid (boolean)
+            'has_bid': has_bid,
+            
             'link': str(item.get('link')) if item.get('link') else None,
             'metadata': metadata,
             'is_active': True,
             'last_scraped_at': datetime.now().isoformat(),
+            
             # ✅ Informações de praça (existe em todas as tabelas)
             'auction_round': int(item.get('auction_round')) if item.get('auction_round') is not None else None,
         }

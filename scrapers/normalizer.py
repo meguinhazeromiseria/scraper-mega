@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-NORMALIZER FORTALECIDO - Limpeza Avançada de Dados
-✅ CORRIGIDO: Remove campos que não existem no schema
+NORMALIZER FORTALECIDO - Limpeza Avançada de Dados (VERSÃO SIMPLIFICADA)
+✅ AJUSTADO: has_bid (boolean) ao invés de total_bids/total_bidders
 
 ✨ Recursos:
 - Extração de título limpo do external_id (MegaLeilões)
@@ -84,10 +84,8 @@ class UniversalNormalizer:
             'store_name': self._clean_text(item.get('store_name')),
             'lot_number': self._clean_text(item.get('lot_number')),
             
-            # Estatísticas
-            'total_visits': self._parse_int(item.get('total_visits'), 0),
-            'total_bids': self._parse_int(item.get('total_bids'), 0),
-            'total_bidders': self._parse_int(item.get('total_bidders'), 0),
+            # ✅ VERSÃO SIMPLIFICADA: has_bid (boolean)
+            'has_bid': self._parse_bool(item.get('has_bid'), False),
             
             # Link
             'link': item.get('link'),
@@ -341,6 +339,25 @@ class UniversalNormalizer:
         except:
             return None
     
+    def _parse_bool(self, value, default: bool = False) -> bool:
+        """
+        ✅ NOVO: Parse boolean com default
+        Aceita: True, False, 1, 0, "true", "false", "1", "0"
+        """
+        if value is None:
+            return default
+        
+        if isinstance(value, bool):
+            return value
+        
+        if isinstance(value, int):
+            return value > 0
+        
+        if isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes', 'sim')
+        
+        return default
+    
     def _clean_city(self, city: Optional[str]) -> Optional[str]:
         """Formata cidade (Title Case)"""
         if not city:
@@ -439,7 +456,9 @@ class UniversalNormalizer:
             'raw_category', 'condition', 'brand', 'model', 'year',
             'quantity', 'unit_price',
             # Campos de praça que foram removidos do schema (preservar no metadata)
-            'discount_percentage', 'first_round_value', 'first_round_date'
+            'discount_percentage', 'first_round_value', 'first_round_date',
+            # ✅ CAMPOS OBSOLETOS: total_bids, total_bidders (preservar no metadata se vieram)
+            'total_bids', 'total_bidders'
         ]
         
         for field in extra_fields:
@@ -463,7 +482,7 @@ def normalize_item(item: dict) -> dict:
 
 # ========== TESTE ==========
 if __name__ == "__main__":
-    print("\n🧪 TESTANDO NORMALIZER - LIMPEZA COMPLETA\n")
+    print("\n🧪 TESTANDO NORMALIZER - VERSÃO SIMPLIFICADA (has_bid)\n")
     print("="*80)
     
     normalizer = UniversalNormalizer()
@@ -477,6 +496,7 @@ if __name__ == "__main__":
             'auction_round': 2,
             'discount_percentage': 15.0,
             'value': 3500.00,
+            'has_bid': True,  # ✅ Boolean
         },
         {
             'source': 'megaleiloes',
@@ -485,6 +505,7 @@ if __name__ == "__main__":
             'description': 'Cadeira odontológica completa da marca Kavo.',
             'auction_round': 1,
             'value': 5000.00,
+            'has_bid': False,  # ✅ Boolean
         },
     ]
     
@@ -494,12 +515,14 @@ if __name__ == "__main__":
         print(f"\n{i}. ORIGINAL:")
         print(f"   title (sujo): {item['title'][:80]}...")
         print(f"   description (suja): {item['description'][:80]}...")
+        print(f"   has_bid: {item.get('has_bid')}")
         
         print(f"\n   ✨ NORMALIZADO:")
         print(f"   title (limpo): {normalized['title']}")
         print(f"   normalized_title: {normalized['normalized_title']}")
         print(f"   description (limpa): {normalized['description'][:80]}...")
         print(f"   auction_round: {normalized['auction_round']}")
+        print(f"   has_bid: {normalized['has_bid']}")  # ✅ Boolean
         print(f"   metadata: {normalized['metadata']}")
         print("-" * 80)
     

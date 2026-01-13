@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MEGALEILÕES - SCRAPER SIMPLIFICADO
-Mapeamento direto: URL do site → Tabela do banco
-Sem IA, sem keywords, apenas categorias oficiais do MegaLeilões
+MEGALEILÕES - SCRAPER COMPLETO (VERSÃO CORRIGIDA - HAS_BID)
+✅ Extrai has_bid do HTML verificando se número de lances > 0
+✅ Salva has_bid (boolean) corretamente
+✅ Mapeamento direto: URL → Tabela do banco
 """
 
 import sys
@@ -36,7 +37,6 @@ def convert_brazilian_datetime_to_postgres(date_str: str) -> str:
         dt_with_tz = dt.replace(tzinfo=ZoneInfo('America/Sao_Paulo'))
         return dt_with_tz.isoformat()
     except Exception as e:
-        print(f"    ⚠️ Erro ao converter data '{date_str}': {e}")
         return None
 
 
@@ -101,12 +101,13 @@ class MegaLeiloesScraper:
             'by_table': defaultdict(int),
             'by_section': {},
             'duplicates': 0,
+            'with_bids': 0,  # ✅ Contador de itens com lances
         }
     
     def scrape(self) -> dict:
         """Scrape completo do MegaLeilões"""
         print("\n" + "="*60)
-        print("🟢 MEGALEILÕES - SCRAPER SIMPLIFICADO")
+        print("🟢 MEGALEILÕES - SCRAPER COMPLETO")
         print("="*60)
         
         items_by_table = defaultdict(list)
@@ -229,6 +230,10 @@ class MegaLeiloesScraper:
                     items.append(item)
                     global_ids.add(item['external_id'])
                     novos += 1
+                    
+                    # ✅ Conta itens com lances
+                    if item.get('has_bid'):
+                        self.stats['with_bids'] += 1
                 
                 if novos > 0:
                     print(f" ✅ +{novos}")
@@ -296,6 +301,9 @@ class MegaLeiloesScraper:
             # ✅ EXTRAI INFORMAÇÕES DE PRAÇA DO HTML
             auction_info = self._extract_auction_info_from_html(card)
             
+            # ✅ EXTRAI has_bid DO HTML (VERSÃO CORRIGIDA)
+            has_bid = self._extract_has_bid_from_html(card)
+            
             value = auction_info.get('current_value')
             value_text = auction_info.get('current_value_text')
             
@@ -341,6 +349,9 @@ class MegaLeiloesScraper:
                 'first_round_date': auction_info.get('first_round_date'),
                 'discount_percentage': auction_info.get('discount_percentage'),
                 
+                # ✅ has_bid (BOOLEAN CORRIGIDO)
+                'has_bid': has_bid,
+                
                 'metadata': {
                     'secao_site': display_name,
                 }
@@ -354,8 +365,62 @@ class MegaLeiloesScraper:
         except Exception as e:
             return None
     
+    def _extract_has_bid_from_html(self, card) -> bool:
+        """
+        ✅ VERSÃO CORRIGIDA: Extrai o número de lances e retorna True se > 0
+        
+        HTML esperado:
+        <div class="card-views-bids">
+            <span><i class="fa fa-eye"></i> 1592</span>      <!-- Visualizações -->
+            <span><i class="fa fa-legal"></i> 0</span>       <!-- Lances -->
+        </div>
+        
+        Retorna:
+            True se o número de lances for > 0
+            False se for 0 ou não encontrar
+        """
+        try:
+            # Estratégia 1: Busca o span que contém o ícone fa-legal
+            legal_span = card.select_one('span:has(i.fa-legal)')
+            
+            if legal_span:
+                text = legal_span.get_text(strip=True)
+                numbers = re.findall(r'\d+', text)
+                
+                if numbers:
+                    bid_count = int(numbers[0])
+                    return bid_count > 0
+            
+            # Estratégia 2: Busca direta pelo ícone e parent span
+            legal_icon = card.select_one('i.fa-legal')
+            if legal_icon:
+                parent_span = legal_icon.find_parent('span')
+                if parent_span:
+                    text = parent_span.get_text(strip=True)
+                    numbers = re.findall(r'\d+', text)
+                    if numbers:
+                        bid_count = int(numbers[0])
+                        return bid_count > 0
+            
+            # Estratégia 3: Busca pelo container card-views-bids
+            views_bids = card.select_one('.card-views-bids, div[class*="views-bids"]')
+            if views_bids:
+                spans = views_bids.find_all('span')
+                for span in spans:
+                    if span.select_one('i.fa-legal'):
+                        text = span.get_text(strip=True)
+                        numbers = re.findall(r'\d+', text)
+                        if numbers:
+                            bid_count = int(numbers[0])
+                            return bid_count > 0
+            
+            return False
+            
+        except Exception as e:
+            return False
+    
     def _extract_auction_info_from_html(self, card) -> dict:
-        """✅ Extrai informações de praça COM CONVERSÃO DE DATA CORRIGIDA"""
+        """Extrai informações de praça COM CONVERSÃO DE DATA CORRIGIDA"""
         info = {
             'auction_round': None,
             'auction_date': None,
@@ -433,7 +498,7 @@ class MegaLeiloesScraper:
 def main():
     """Execução principal"""
     print("\n" + "="*70)
-    print("🚀 MEGALEILÕES - SCRAPER SIMPLIFICADO")
+    print("🚀 MEGALEILÕES - SCRAPER COMPLETO")
     print("="*70)
     print(f"📅 Início: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
@@ -447,6 +512,7 @@ def main():
     total_items = sum(len(items) for items in items_by_table.values())
     
     print(f"\n✅ Total coletado: {total_items} itens")
+    print(f"🔥 Itens com lances: {scraper.stats['with_bids']}")
     print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
     
     if not total_items:
@@ -518,11 +584,12 @@ def main():
     print("\n" + "="*70)
     print("📊 ESTATÍSTICAS FINAIS")
     print("="*70)
-    print(f"🟢 MegaLeilões - Scraper Simplificado:")
+    print(f"🟢 MegaLeilões - Scraper Completo:")
     print(f"\n  Por Tabela:")
     for table, count in sorted(scraper.stats['by_table'].items()):
         print(f"    • {table}: {count} itens")
     print(f"\n  • Total coletado: {scraper.stats['total_scraped']}")
+    print(f"  • Com lances: {scraper.stats['with_bids']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
     print(f"\n⏱️ Duração: {minutes}min {seconds}s")
     print(f"✅ Concluído: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
