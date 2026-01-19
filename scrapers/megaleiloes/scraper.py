@@ -420,7 +420,7 @@ def main():
     
     # Importa e usa o cliente Supabase
     try:
-        from supabase_megaleiloes import SupabaseMegaLeiloes
+        from supabase_client import SupabaseMegaLeiloes
         
         print("\n📤 INSERINDO NO SUPABASE")
         supabase = SupabaseMegaLeiloes()

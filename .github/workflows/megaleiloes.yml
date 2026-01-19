@@ -50,7 +50,8 @@ jobs:
           echo "📄 Modo: TODAS as páginas disponíveis"
           echo "========================================"
           
-          python scraper_megaleiloes.py
+          cd scrapers/megaleiloes
+          python scraper.py
           
           echo ""
           echo "✅ Concluído: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
@@ -60,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: megaleiloes-data-${{ github.run_number }}
-          path: data/megaleiloes_*.json
+          path: scrapers/megaleiloes/data/normalized/megaleiloes_*.json
           retention-days: 3
       
       - name: 📊 Gerar resumo
@@ -73,9 +74,9 @@ jobs:
           echo "**Horário Brasil:** $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M')" >> $GITHUB_STEP_SUMMARY
           echo "**Run #:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           
-          if [ -f data/megaleiloes_*.json ]; then
+          if [ -f scrapers/megaleiloes/data/normalized/megaleiloes_*.json ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📊 Dados Coletados" >> $GITHUB_STEP_SUMMARY
-            ITEM_COUNT=$(cat data/megaleiloes_*.json | grep -c '"external_id"' || echo "0")
+            ITEM_COUNT=$(cat scrapers/megaleiloes/data/normalized/megaleiloes_*.json | grep -c '"external_id"' || echo "0")
             echo "- **Total de itens:** $ITEM_COUNT" >> $GITHUB_STEP_SUMMARY
           fi
