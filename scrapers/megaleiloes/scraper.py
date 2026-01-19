@@ -1,116 +1,96 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MEGALEILÕES - SCRAPER COMPLETO (VERSÃO CORRIGIDA - HAS_BID)
-✅ Extrai has_bid do HTML verificando se número de lances > 0
-✅ Salva has_bid (boolean) corretamente
-✅ Mapeamento direto: URL → Tabela do banco
+MEGALEILÕES - SCRAPER DIRETO PARA megaleiloes_items
+✅ Remove dependência do normalizer
+✅ Salva diretamente na tabela megaleiloes_items
+✅ Extrai has_bid do HTML
+✅ Mantém informações de praça (auction_round, discount_percentage, etc)
 """
 
 import sys
 import json
 import time
-import random
 import re
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from collections import defaultdict
-from typing import List, Optional, Tuple
-
-# Adiciona pasta scrapers/ ao path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from supabase_client import SupabaseClient
-from normalizer import normalize_items
+from typing import List, Dict, Optional
 
 # Imports do scraper
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
 
-def convert_brazilian_datetime_to_postgres(date_str: str) -> str:
+def convert_brazilian_datetime_to_postgres(date_str: str) -> Optional[str]:
     """Converte data brasileira DD/MM/YYYY HH:MM para PostgreSQL ISO format"""
     try:
         date_str = date_str.replace('às', '').strip()
         dt = datetime.strptime(date_str, '%d/%m/%Y %H:%M')
         dt_with_tz = dt.replace(tzinfo=ZoneInfo('America/Sao_Paulo'))
         return dt_with_tz.isoformat()
-    except Exception as e:
+    except Exception:
         return None
 
 
 class MegaLeiloesScraper:
-    """Scraper com mapeamento direto de categorias do site"""
+    """Scraper para MegaLeilões com mapeamento de categorias"""
     
     def __init__(self):
         self.source = 'megaleiloes'
         self.base_url = 'https://www.megaleiloes.com.br'
         
-        # MAPEAMENTO DIRETO: (url_path, tabela_destino, nome_exibicao, campos_extras)
+        # Mapeamento: (url_path, category, display_name)
         self.sections = [
-            # ========== VEÍCULOS (6 tipos) ==========
-            ('veiculos/aeronaves', 'veiculos', 'Aeronaves', {'vehicle_type': 'aeronave'}),
-            ('veiculos/barcos', 'veiculos', 'Barcos', {'vehicle_type': 'barco'}),
-            ('veiculos/caminhoes', 'veiculos', 'Caminhões', {'vehicle_type': 'caminhao'}),
-            ('veiculos/carros', 'veiculos', 'Carros', {'vehicle_type': 'carro'}),
-            ('veiculos/motos', 'veiculos', 'Motos', {'vehicle_type': 'moto'}),
-            ('veiculos/onibus', 'veiculos', 'Ônibus', {'vehicle_type': 'onibus'}),
+            # VEÍCULOS
+            ('veiculos/aeronaves', 'Aeronaves', 'Aeronaves'),
+            ('veiculos/barcos', 'Barcos', 'Barcos'),
+            ('veiculos/caminhoes', 'Caminhões', 'Caminhões'),
+            ('veiculos/carros', 'Carros', 'Carros'),
+            ('veiculos/motos', 'Motos', 'Motos'),
+            ('veiculos/onibus', 'Ônibus', 'Ônibus'),
             
-            # ========== IMÓVEIS (14 tipos) ==========
-            ('imoveis/apartamentos', 'imoveis', 'Apartamentos', {'property_type': 'apartamento'}),
-            ('imoveis/casas', 'imoveis', 'Casas', {'property_type': 'casa'}),
-            ('imoveis/galpoes--industriais', 'imoveis', 'Galpões Industriais', {'property_type': 'galpao_industrial'}),
-            ('imoveis/glebas', 'imoveis', 'Glebas', {'property_type': 'gleba'}),
-            ('imoveis/deposito-de-garagem', 'imoveis', 'Depósito de Garagem', {'property_type': 'deposito_garagem'}),
-            ('imoveis/hospitais', 'imoveis', 'Hospitais', {'property_type': 'hospital'}),
-            ('imoveis/hoteis', 'imoveis', 'Hotéis', {'property_type': 'hotel'}),
-            ('imoveis/imoveis-comerciais', 'imoveis', 'Imóveis Comerciais', {'property_type': 'comercial'}),
-            ('imoveis/imoveis-rurais', 'imoveis', 'Imóveis Rurais', {'property_type': 'rural'}),
-            ('imoveis/outros', 'imoveis', 'Outros Imóveis', {'property_type': 'outro'}),
-            ('imoveis/resorts', 'imoveis', 'Resorts', {'property_type': 'resort'}),
-            ('imoveis/terrenos-e-lotes', 'imoveis', 'Terrenos e Lotes', {'property_type': 'terreno_lote'}),
-            ('imoveis/terrenos-para-incorporacao', 'imoveis', 'Terrenos p/ Incorporação', {'property_type': 'terreno_incorporacao'}),
-            ('imoveis/vagas-de-garagem', 'imoveis', 'Vagas de Garagem', {'property_type': 'vaga_garagem'}),
+            # IMÓVEIS
+            ('imoveis/apartamentos', 'Apartamentos', 'Apartamentos'),
+            ('imoveis/casas', 'Casas', 'Casas'),
+            ('imoveis/galpoes--industriais', 'Galpões Industriais', 'Galpões Industriais'),
+            ('imoveis/glebas', 'Glebas', 'Glebas'),
+            ('imoveis/deposito-de-garagem', 'Depósito de Garagem', 'Depósito de Garagem'),
+            ('imoveis/hospitais', 'Hospitais', 'Hospitais'),
+            ('imoveis/hoteis', 'Hotéis', 'Hotéis'),
+            ('imoveis/imoveis-comerciais', 'Imóveis Comerciais', 'Imóveis Comerciais'),
+            ('imoveis/imoveis-rurais', 'Imóveis Rurais', 'Imóveis Rurais'),
+            ('imoveis/outros', 'Outros Imóveis', 'Outros Imóveis'),
+            ('imoveis/resorts', 'Resorts', 'Resorts'),
+            ('imoveis/terrenos-e-lotes', 'Terrenos e Lotes', 'Terrenos e Lotes'),
+            ('imoveis/terrenos-para-incorporacao', 'Terrenos p/ Incorporação', 'Terrenos p/ Incorporação'),
+            ('imoveis/vagas-de-garagem', 'Vagas de Garagem', 'Vagas de Garagem'),
             
-            # ========== ELETRODOMÉSTICOS ==========
-            ('bens-de-consumo/eletrodomesticos', 'eletrodomesticos', 'Eletrodomésticos', {}),
-            
-            # ========== TECNOLOGIA ==========
-            ('bens-de-consumo/eletronicos', 'tecnologia', 'Eletrônicos', {}),
-            
-            # ========== MÓVEIS ==========
-            ('bens-de-consumo/moveis', 'moveis_decoracao', 'Móveis', {}),
-            
-            # ========== INDUSTRIAL ==========
-            ('industrial/maquinas', 'industrial_equipamentos', 'Máquinas Industriais', {}),
-            
-            # ========== ANIMAIS (2 tipos) ==========
-            ('animais/cavalos', 'animais', 'Cavalos', {'animal_type': 'cavalo'}),
-            ('animais/gado-bovino', 'animais', 'Gado Bovino', {'animal_type': 'gado_bovino'}),
-            
-            # ========== DIVERSOS ==========
-            ('outros/diversos', 'diversos', 'Diversos', {}),
-            
-            # ========== ARTES ==========
-            ('outros/obras-de-arte', 'artes_colecionismo', 'Obras de Arte', {}),
+            # OUTROS
+            ('bens-de-consumo/eletrodomesticos', 'Eletrodomésticos', 'Eletrodomésticos'),
+            ('bens-de-consumo/eletronicos', 'Eletrônicos', 'Eletrônicos'),
+            ('bens-de-consumo/moveis', 'Móveis', 'Móveis'),
+            ('industrial/maquinas', 'Máquinas Industriais', 'Máquinas Industriais'),
+            ('animais/cavalos', 'Cavalos', 'Cavalos'),
+            ('animais/gado-bovino', 'Gado Bovino', 'Gado Bovino'),
+            ('outros/diversos', 'Diversos', 'Diversos'),
+            ('outros/obras-de-arte', 'Obras de Arte', 'Obras de Arte'),
         ]
         
         self.stats = {
             'total_scraped': 0,
-            'by_table': defaultdict(int),
-            'by_section': {},
+            'by_category': {},
             'duplicates': 0,
-            'with_bids': 0,  # ✅ Contador de itens com lances
+            'with_bids': 0,
         }
     
-    def scrape(self) -> dict:
-        """Scrape completo do MegaLeilões"""
+    def scrape(self) -> List[Dict]:
+        """Scrape completo do MegaLeilões - retorna lista de itens"""
         print("\n" + "="*60)
-        print("🟢 MEGALEILÕES - SCRAPER COMPLETO")
+        print("🟢 MEGALEILÕES - SCRAPER")
         print("="*60)
         
-        items_by_table = defaultdict(list)
+        all_items = []
         global_ids = set()
         
         cookies_raw = self._get_cookies()
@@ -130,18 +110,17 @@ class MegaLeiloesScraper:
                 
                 page = context.new_page()
                 
-                for url_path, table, display_name, extra_fields in self.sections:
-                    print(f"\n📦 {display_name} → {table}")
+                for url_path, category, display_name in self.sections:
+                    print(f"\n📦 {display_name}")
                     
                     section_items = self._scrape_section(
-                        page, url_path, table, display_name, extra_fields, global_ids
+                        page, url_path, category, display_name, global_ids
                     )
                     
-                    items_by_table[table].extend(section_items)
-                    self.stats['by_section'][url_path] = len(section_items)
-                    self.stats['by_table'][table] += len(section_items)
+                    all_items.extend(section_items)
+                    self.stats['by_category'][category] = len(section_items)
                     
-                    print(f"✅ {len(section_items)} itens → {table}")
+                    print(f"✅ {len(section_items)} itens")
                     
                     time.sleep(2)
                 
@@ -150,8 +129,8 @@ class MegaLeiloesScraper:
         except Exception as e:
             print(f"❌ Erro geral: {e}")
         
-        self.stats['total_scraped'] = sum(len(items) for items in items_by_table.values())
-        return items_by_table
+        self.stats['total_scraped'] = len(all_items)
+        return all_items
     
     def _get_cookies(self) -> List[dict]:
         """Captura cookies do MegaLeilões"""
@@ -179,9 +158,8 @@ class MegaLeiloesScraper:
             print(f"    ⚠️ Erro ao capturar cookies: {e}")
             return []
     
-    def _scrape_section(self, page, url_path: str, table: str, 
-                       display_name: str, extra_fields: dict, 
-                       global_ids: set) -> List[dict]:
+    def _scrape_section(self, page, url_path: str, category: str,
+                       display_name: str, global_ids: set) -> List[Dict]:
         """Scrape uma seção específica"""
         items = []
         page_num = 1
@@ -189,225 +167,130 @@ class MegaLeiloesScraper:
         max_empty = 2
         max_pages = 50
         
-        while page_num <= max_pages and consecutive_empty < max_empty:
-            if page_num == 1:
-                url = f"{self.base_url}/{url_path}"
-            else:
-                url = f"{self.base_url}/{url_path}?pagina={page_num}"
-            
-            print(f"  Pág {page_num}", end='', flush=True)
+        while page_num <= max_pages:
+            url = f"{self.base_url}/{url_path}?page={page_num}"
             
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                time.sleep(random.uniform(3, 5))
-                
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 time.sleep(2)
                 
                 html = page.content()
-                soup = BeautifulSoup(html, 'html.parser')
+                soup = BeautifulSoup(html, 'lxml')
                 
-                cards = soup.select('div.card, .leilao-card, div[class*="card"]')
+                cards = soup.select('div.card')
                 
                 if not cards:
-                    print(f" ⚪ Vazia (0 cards) - parando")
-                    break
+                    consecutive_empty += 1
+                    if consecutive_empty >= max_empty:
+                        break
+                    page_num += 1
+                    continue
                 
-                novos = 0
-                duplicados = 0
+                consecutive_empty = 0
                 
                 for card in cards:
-                    item = self._extract_card(card, table, display_name, extra_fields)
+                    item = self._parse_card(card, category)
                     
-                    if not item:
-                        continue
-                    
-                    if item['external_id'] in global_ids:
-                        duplicados += 1
+                    if item and item['external_id'] not in global_ids:
+                        items.append(item)
+                        global_ids.add(item['external_id'])
+                        
+                        if item.get('has_bid'):
+                            self.stats['with_bids'] += 1
+                    elif item:
                         self.stats['duplicates'] += 1
-                        continue
-                    
-                    items.append(item)
-                    global_ids.add(item['external_id'])
-                    novos += 1
-                    
-                    # ✅ Conta itens com lances
-                    if item.get('has_bid'):
-                        self.stats['with_bids'] += 1
-                
-                if novos > 0:
-                    print(f" ✅ +{novos}")
-                    consecutive_empty = 0
-                else:
-                    print(f" ⚪ 0 novos (dup: {duplicados})")
-                    consecutive_empty += 1
                 
                 page_num += 1
-                time.sleep(random.uniform(3, 6))
                 
             except Exception as e:
-                print(f" ❌ Erro: {str(e)[:80]}")
-                consecutive_empty += 1
+                print(f"    ⚠️ Erro na página {page_num}: {e}")
                 page_num += 1
+                continue
         
         return items
     
-    def _extract_card(self, card, table: str, display_name: str, 
-                     extra_fields: dict) -> Optional[dict]:
-        """Extrai dados do card"""
+    def _parse_card(self, card, category: str) -> Optional[Dict]:
+        """Parse de um card de leilão - formato megaleiloes_items"""
         try:
-            link_elem = card.select_one('a[href]')
-            if not link_elem:
+            # Link e external_id
+            link_elem = card.select_one('a.card-link')
+            if not link_elem or not link_elem.get('href'):
                 return None
             
-            link = link_elem.get('href', '')
-            if not link or 'javascript' in link:
-                return None
-            
+            link = link_elem['href']
             if not link.startswith('http'):
-                link = f"{self.base_url}{link}"
+                link = self.base_url + link
             
-            link_clean = link.rstrip('/')
+            # External ID da URL
+            external_id = f"{self.source}_{link.split('/')[-1].split('?')[0]}"
             
-            invalid_endings = [
-                '/imoveis', '/veiculos', '/bens-de-consumo', '/industrial', 
-                '/animais', '/outros', '/carros', '/motos', '/apartamentos'
-            ]
+            # Título
+            title_elem = card.select_one('.card-title')
+            title = title_elem.get_text(strip=True) if title_elem else 'Sem Título'
             
-            if any(link_clean.endswith(ending) for ending in invalid_endings):
-                return None
+            # Descrição (todo o texto do card)
+            description = card.get_text(separator=' ', strip=True)
             
-            external_id = None
-            parts = link.rstrip('/').split('/')
-            for part in reversed(parts):
-                if part and not part.startswith('?'):
-                    external_id = f"megaleiloes_{part.split('?')[0]}"
-                    break
+            # Localização
+            location_elem = card.select_one('.card-location')
+            city = None
+            state = None
             
-            if not external_id or external_id == 'megaleiloes_':
-                return None
+            if location_elem:
+                location_text = location_elem.get_text(strip=True)
+                if ',' in location_text:
+                    parts = location_text.split(',')
+                    city = parts[0].strip()
+                    state_raw = parts[1].strip()
+                    if len(state_raw) == 2:
+                        state = state_raw.upper()
             
-            texto = card.get_text(separator=' ', strip=True)
-            
-            texto_lower = texto.lower()
-            if 'exibindo' in texto_lower and 'itens' in texto_lower:
-                return None
-            
-            if len(texto) < 10:
-                return None
-            
-            title = texto[:150].strip() if texto else f"Item {display_name}"
-            
-            # ✅ EXTRAI INFORMAÇÕES DE PRAÇA DO HTML
+            # Informações de praça
             auction_info = self._extract_auction_info_from_html(card)
             
-            # ✅ EXTRAI has_bid DO HTML (VERSÃO CORRIGIDA)
-            has_bid = self._extract_has_bid_from_html(card)
+            # Has bid
+            has_bid = self._extract_has_bid(card)
             
-            value = auction_info.get('current_value')
-            value_text = auction_info.get('current_value_text')
+            # Tipo de leilão
+            auction_type_elem = card.select_one('.card-auction-type')
+            auction_type = auction_type_elem.get_text(strip=True) if auction_type_elem else None
             
-            if not value:
-                price_match = re.search(r'R\$\s*([\d.]+,\d{2})', texto)
-                if price_match:
-                    value_text = f"R$ {price_match.group(1)}"
-                    try:
-                        value = float(price_match.group(1).replace('.', '').replace(',', '.'))
-                    except:
-                        pass
-            
-            state = None
-            state_match = re.search(r'\b([A-Z]{2})\b', texto)
-            if state_match:
-                uf = state_match.group(1)
-                valid_states = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
-                               'PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
-                if uf in valid_states:
-                    state = uf
-            
-            city = None
-            city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú\s]+)\s*[-–/,]\s*[A-Z]{2}', texto)
-            if city_match:
-                city = city_match.group(1).strip()
-            
+            # Constrói o item no formato da tabela megaleiloes_items
             item = {
-                'source': 'megaleiloes',
+                'source': self.source,
                 'external_id': external_id,
+                'category': category,
                 'title': title,
-                'description': texto,
-                'value': value,
-                'value_text': value_text,
+                'description': description,
                 'city': city,
                 'state': state,
-                'link': link,
-                'target_table': table,
-                
-                # ✅ Informações de praça extraídas do HTML
+                'value': auction_info.get('current_value'),
+                'value_text': auction_info.get('current_value_text'),
                 'auction_round': auction_info.get('auction_round'),
                 'auction_date': auction_info.get('auction_date'),
                 'first_round_value': auction_info.get('first_round_value'),
                 'first_round_date': auction_info.get('first_round_date'),
                 'discount_percentage': auction_info.get('discount_percentage'),
-                
-                # ✅ has_bid (BOOLEAN CORRIGIDO)
+                'link': link,
+                'metadata': {},
+                'is_active': True,
                 'has_bid': has_bid,
-                
-                'metadata': {
-                    'secao_site': display_name,
-                }
+                'auction_type': auction_type,
             }
-            
-            if extra_fields:
-                item.update(extra_fields)
             
             return item
             
         except Exception as e:
             return None
     
-    def _extract_has_bid_from_html(self, card) -> bool:
-        """
-        ✅ VERSÃO CORRIGIDA: Extrai o número de lances e retorna True se > 0
-        
-        HTML esperado:
-        <div class="card-views-bids">
-            <span><i class="fa fa-eye"></i> 1592</span>      <!-- Visualizações -->
-            <span><i class="fa fa-legal"></i> 0</span>       <!-- Lances -->
-        </div>
-        
-        Retorna:
-            True se o número de lances for > 0
-            False se for 0 ou não encontrar
-        """
+    def _extract_has_bid(self, card) -> bool:
+        """Verifica se o item tem lances"""
         try:
-            # Estratégia 1: Busca o span que contém o ícone fa-legal
-            legal_span = card.select_one('span:has(i.fa-legal)')
-            
-            if legal_span:
-                text = legal_span.get_text(strip=True)
-                numbers = re.findall(r'\d+', text)
-                
-                if numbers:
-                    bid_count = int(numbers[0])
-                    return bid_count > 0
-            
-            # Estratégia 2: Busca direta pelo ícone e parent span
-            legal_icon = card.select_one('i.fa-legal')
-            if legal_icon:
-                parent_span = legal_icon.find_parent('span')
-                if parent_span:
-                    text = parent_span.get_text(strip=True)
-                    numbers = re.findall(r'\d+', text)
-                    if numbers:
-                        bid_count = int(numbers[0])
-                        return bid_count > 0
-            
-            # Estratégia 3: Busca pelo container card-views-bids
-            views_bids = card.select_one('.card-views-bids, div[class*="views-bids"]')
-            if views_bids:
-                spans = views_bids.find_all('span')
+            bid_info = card.select_one('.card-bid-info')
+            if bid_info:
+                spans = bid_info.select('span')
                 for span in spans:
-                    if span.select_one('i.fa-legal'):
+                    if 'lance' in span.get_text(strip=True).lower():
                         text = span.get_text(strip=True)
                         numbers = re.findall(r'\d+', text)
                         if numbers:
@@ -416,11 +299,11 @@ class MegaLeiloesScraper:
             
             return False
             
-        except Exception as e:
+        except Exception:
             return False
     
-    def _extract_auction_info_from_html(self, card) -> dict:
-        """Extrai informações de praça COM CONVERSÃO DE DATA CORRIGIDA"""
+    def _extract_auction_info_from_html(self, card) -> Dict:
+        """Extrai informações de praça do HTML"""
         info = {
             'auction_round': None,
             'auction_date': None,
@@ -431,9 +314,11 @@ class MegaLeiloesScraper:
             'discount_percentage': None,
         }
         
+        # Praça ativa
         active_instance = card.select_one('.instance.active')
         
         if active_instance:
+            # Verifica se é 2ª praça
             second_date = active_instance.select_one('.card-second-instance-date')
             first_date = active_instance.select_one('.card-first-instance-date')
             
@@ -453,6 +338,7 @@ class MegaLeiloesScraper:
                     date_str = f"{date_match.group(1)} {date_match.group(2)}"
                     info['auction_date'] = convert_brazilian_datetime_to_postgres(date_str)
             
+            # Valor da praça ativa
             value_elem = active_instance.select_one('.card-instance-value')
             if value_elem:
                 value_text = value_elem.get_text(strip=True)
@@ -465,6 +351,7 @@ class MegaLeiloesScraper:
                     except:
                         pass
         
+        # Primeira praça (se passou)
         first_instance = card.select_one('.instance.first.passed')
         if first_instance:
             date_elem = first_instance.select_one('.card-first-instance-date')
@@ -485,6 +372,7 @@ class MegaLeiloesScraper:
                     except:
                         pass
         
+        # Calcula percentual de desconto
         if info['first_round_value'] and info['current_value'] and info['auction_round'] == 2:
             try:
                 discount = ((info['first_round_value'] - info['current_value']) / info['first_round_value']) * 100
@@ -498,81 +386,52 @@ class MegaLeiloesScraper:
 def main():
     """Execução principal"""
     print("\n" + "="*70)
-    print("🚀 MEGALEILÕES - SCRAPER COMPLETO")
+    print("🚀 MEGALEILÕES - SCRAPER")
     print("="*70)
     print(f"📅 Início: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
     
     start_time = time.time()
     
-    print("\n🔥 FASE 1: COLETANDO DADOS")
+    # Scrape
     scraper = MegaLeiloesScraper()
-    items_by_table = scraper.scrape()
+    items = scraper.scrape()
     
-    total_items = sum(len(items) for items in items_by_table.values())
-    
-    print(f"\n✅ Total coletado: {total_items} itens")
+    print(f"\n✅ Total coletado: {len(items)} itens")
     print(f"🔥 Itens com lances: {scraper.stats['with_bids']}")
     print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
     
-    if not total_items:
+    if not items:
         print("⚠️ Nenhum item coletado - encerrando")
         return
     
-    print("\n✨ FASE 2: NORMALIZANDO DADOS")
-    
-    normalized_by_table = {}
-    
-    for table, items in items_by_table.items():
-        if not items:
-            continue
-        
-        try:
-            normalized = normalize_items(items)
-            normalized_by_table[table] = normalized
-            print(f"  ✅ {table}: {len(normalized)} itens normalizados")
-        except Exception as e:
-            print(f"  ⚠️ Erro em {table}: {e}")
-            normalized_by_table[table] = items
-    
-    output_dir = Path(__file__).parent / 'data' / 'normalized'
+    # Salva JSON
+    output_dir = Path(__file__).parent / 'data'
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     json_file = output_dir / f'megaleiloes_{timestamp}.json'
     
     with open(json_file, 'w', encoding='utf-8') as f:
-        json.dump(normalized_by_table, f, ensure_ascii=False, indent=2)
+        json.dump(items, f, ensure_ascii=False, indent=2)
     print(f"💾 JSON salvo: {json_file}")
     
-    print("\n📤 FASE 3: INSERINDO NO SUPABASE")
-    
+    # Importa e usa o cliente Supabase
     try:
-        supabase = SupabaseClient()
+        from supabase_megaleiloes import SupabaseMegaLeiloes
+        
+        print("\n📤 INSERINDO NO SUPABASE")
+        supabase = SupabaseMegaLeiloes()
         
         if not supabase.test():
             print("⚠️ Erro na conexão com Supabase - pulando insert")
         else:
-            total_inserted = 0
-            total_updated = 0
+            stats = supabase.upsert(items)
             
-            for table, items in normalized_by_table.items():
-                if not items:
-                    continue
-                
-                print(f"\n  📤 Tabela '{table}': {len(items)} itens")
-                stats = supabase.upsert(table, items)
-                
-                print(f"    ✅ Inseridos: {stats['inserted']}")
-                print(f"    🔄 Atualizados: {stats['updated']}")
-                if stats['errors'] > 0:
-                    print(f"    ⚠️ Erros: {stats['errors']}")
-                
-                total_inserted += stats['inserted']
-                total_updated += stats['updated']
-            
-            print(f"\n  📈 TOTAL:")
-            print(f"    ✅ Inseridos: {total_inserted}")
-            print(f"    🔄 Atualizados: {total_updated}")
+            print(f"\n  📈 RESULTADO:")
+            print(f"    ✅ Inseridos: {stats['inserted']}")
+            print(f"    🔄 Atualizados: {stats['updated']}")
+            if stats['errors'] > 0:
+                print(f"    ⚠️ Erros: {stats['errors']}")
     
     except Exception as e:
         print(f"⚠️ Erro no Supabase: {e}")
@@ -584,10 +443,9 @@ def main():
     print("\n" + "="*70)
     print("📊 ESTATÍSTICAS FINAIS")
     print("="*70)
-    print(f"🟢 MegaLeilões - Scraper Completo:")
-    print(f"\n  Por Tabela:")
-    for table, count in sorted(scraper.stats['by_table'].items()):
-        print(f"    • {table}: {count} itens")
+    print(f"\n  Por Categoria:")
+    for category, count in sorted(scraper.stats['by_category'].items()):
+        print(f"    • {category}: {count} itens")
     print(f"\n  • Total coletado: {scraper.stats['total_scraped']}")
     print(f"  • Com lances: {scraper.stats['with_bids']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
