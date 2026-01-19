@@ -1,5 +1,4 @@
 name: 🟢 MegaLeilões - Scraper Completo
-
 on:
   # Execução manual
   workflow_dispatch:
@@ -61,7 +60,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: megaleiloes-data-${{ github.run_number }}
-          path: scrapers/megaleiloes/data/normalized/megaleiloes_*.json
+          path: scrapers/megaleiloes/data/megaleiloes_*.json
           retention-days: 3
       
       - name: 📊 Gerar resumo
@@ -74,9 +73,9 @@ jobs:
           echo "**Horário Brasil:** $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M')" >> $GITHUB_STEP_SUMMARY
           echo "**Run #:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           
-          if [ -f scrapers/megaleiloes/data/normalized/megaleiloes_*.json ]; then
+          if ls scrapers/megaleiloes/data/megaleiloes_*.json 1> /dev/null 2>&1; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📊 Dados Coletados" >> $GITHUB_STEP_SUMMARY
-            ITEM_COUNT=$(cat scrapers/megaleiloes/data/normalized/megaleiloes_*.json | grep -c '"external_id"' || echo "0")
+            ITEM_COUNT=$(cat scrapers/megaleiloes/data/megaleiloes_*.json | grep -c '"external_id"' || echo "0")
             echo "- **Total de itens:** $ITEM_COUNT" >> $GITHUB_STEP_SUMMARY
           fi

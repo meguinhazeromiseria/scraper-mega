@@ -12,6 +12,7 @@ import sys
 import json
 import time
 import re
+import os
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -19,6 +20,9 @@ from typing import List, Dict, Optional
 
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+
+# Adiciona o diretório atual ao path para importar supabase_client
+sys.path.insert(0, str(Path(__file__).parent))
 
 
 def convert_brazilian_datetime_to_postgres(date_str: str) -> Optional[str]:
@@ -506,27 +510,36 @@ def main():
     
     # Importa e usa o cliente Supabase
     try:
-        from supabase_client import SupabaseMegaLeiloes
-        
-        print(f"\n{'='*70}")
-        print("📤 INSERINDO NO SUPABASE")
-        print(f"{'='*70}")
-        
-        supabase = SupabaseMegaLeiloes()
-        
-        if not supabase.test():
-            print("⚠️ Erro na conexão com Supabase - pulando insert")
+        # Verifica se as variáveis de ambiente estão configuradas
+        if not os.getenv('SUPABASE_URL') or not os.getenv('SUPABASE_SERVICE_ROLE_KEY'):
+            print("\n⚠️ Variáveis SUPABASE não configuradas - pulando insert")
         else:
-            stats = supabase.upsert(items)
+            from supabase_client import SupabaseMegaLeiloes
             
-            print(f"\n  📈 RESULTADO:")
-            print(f"    ✅ Inseridos: {stats['inserted']}")
-            print(f"    🔄 Atualizados: {stats['updated']}")
-            if stats['errors'] > 0:
-                print(f"    ⚠️ Erros: {stats['errors']}")
+            print(f"\n{'='*70}")
+            print("📤 INSERINDO NO SUPABASE")
+            print(f"{'='*70}")
+            
+            supabase = SupabaseMegaLeiloes()
+            
+            if not supabase.test():
+                print("⚠️ Erro na conexão com Supabase - pulando insert")
+            else:
+                stats = supabase.upsert(items)
+                
+                print(f"\n  📈 RESULTADO:")
+                print(f"    ✅ Inseridos: {stats['inserted']}")
+                print(f"    🔄 Atualizados: {stats['updated']}")
+                if stats['errors'] > 0:
+                    print(f"    ⚠️ Erros: {stats['errors']}")
     
+    except ImportError as e:
+        print(f"\n⚠️ Módulo supabase_client não encontrado: {e}")
+        print("   (JSON salvo, mas não foi possível inserir no banco)")
     except Exception as e:
         print(f"\n⚠️ Erro no Supabase: {e}")
+        import traceback
+        traceback.print_exc()
     
     elapsed = time.time() - start_time
     minutes = int(elapsed // 60)

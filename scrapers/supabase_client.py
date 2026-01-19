@@ -3,7 +3,7 @@
 """
 SUPABASE CLIENT - MEGALEILOES_ITEMS
 ✅ Cliente específico para tabela megaleiloes_items
-✅ Suporta todos os campos da tabela incluindo informações de praça
+✅ Suporta todos os campos incluindo image_url
 ✅ Validação de dados conforme schema
 """
 
@@ -170,6 +170,15 @@ class SupabaseMegaLeiloes:
         elif not isinstance(has_bid, bool):
             has_bid = str(has_bid).lower() in ('true', '1', 'yes', 'sim')
         
+        # Processa image_url
+        image_url = item.get('image_url')
+        if image_url and isinstance(image_url, str):
+            image_url = image_url.strip()
+            if not image_url or not image_url.startswith('http'):
+                image_url = None
+        else:
+            image_url = None
+        
         # Processa metadata
         metadata = item.get('metadata', {})
         if not isinstance(metadata, dict):
@@ -179,7 +188,7 @@ class SupabaseMegaLeiloes:
         data = {
             'external_id': str(external_id),
             'category': str(item.get('category')) if item.get('category') else None,
-            'title': str(item.get('title', 'Sem Título'))[:1000],  # TEXT sem limite, mas vamos limitar
+            'title': str(item.get('title', 'Sem Título'))[:1000],
             'description': str(item.get('description')) if item.get('description') else None,
             'city': str(item.get('city')) if item.get('city') else None,
             'state': state,
@@ -191,6 +200,7 @@ class SupabaseMegaLeiloes:
             'first_round_date': first_round_date,
             'discount_percentage': discount_percentage,
             'link': str(item.get('link')) if item.get('link') else None,
+            'image_url': image_url,
             'source': str(item.get('source', 'megaleiloes')),
             'metadata': metadata,
             'is_active': True,
@@ -276,6 +286,26 @@ class SupabaseMegaLeiloes:
         
         return []
     
+    def get_with_images(self, limit: int = 100) -> List[Dict]:
+        """Busca itens que possuem imagem"""
+        try:
+            url = f"{self.url}/rest/v1/{self.table}"
+            params = {
+                'image_url': 'not.is.null',
+                'is_active': 'eq.true',
+                'order': 'created_at.desc',
+                'limit': limit
+            }
+            
+            r = self.session.get(url, params=params, timeout=30)
+            
+            if r.status_code == 200:
+                return r.json()
+        except:
+            pass
+        
+        return []
+    
     def __del__(self):
         if hasattr(self, 'session'):
             self.session.close()
@@ -293,9 +323,13 @@ if __name__ == "__main__":
         print(f"  Total de itens: {stats['total']}")
         
         # Exemplo de busca por categoria
-        carros = client.get_by_category('Carros', limit=5)
-        print(f"\n🚗 Primeiros carros: {len(carros)} itens")
+        imoveis = client.get_by_category('Imóveis', limit=5)
+        print(f"\n🏠 Primeiros imóveis: {len(imoveis)} itens")
         
         # Exemplo de busca por praça
         segunda_praca = client.get_by_round(2, limit=5)
         print(f"💰 Segunda praça: {len(segunda_praca)} itens")
+        
+        # Exemplo de busca com imagens
+        com_imagem = client.get_with_images(limit=5)
+        print(f"🖼️ Com imagens: {len(com_imagem)} itens")
