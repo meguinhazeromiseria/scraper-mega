@@ -36,9 +36,18 @@ def convert_brazilian_datetime_to_postgres(date_str: str) -> Optional[str]:
 class MegaLeiloesScraper:
     """Scraper para MegaLeilões com mapeamento de categorias"""
     
-    def __init__(self):
+    def __init__(self, max_pages_per_section=50, headless=True, timeout=30000):
+        """
+        Args:
+            max_pages_per_section: Máximo de páginas por seção (default: 50)
+            headless: Se o browser deve rodar em modo headless (default: True)
+            timeout: Timeout em ms para carregar páginas (default: 30000)
+        """
         self.source = 'megaleiloes'
         self.base_url = 'https://www.megaleiloes.com.br'
+        self.max_pages_per_section = max_pages_per_section
+        self.headless = headless
+        self.timeout = timeout
         
         # Mapeamento: (url_path, category, display_name)
         self.sections = [
@@ -175,7 +184,7 @@ class MegaLeiloesScraper:
                 time.sleep(2)
                 
                 html = page.content()
-                soup = BeautifulSoup(html, 'lxml')
+                soup = BeautifulSoup(html, 'html.parser')
                 
                 cards = soup.select('div.card')
                 
