@@ -21,8 +21,8 @@ from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
-# Adiciona o diretório atual ao path para importar supabase_client
-sys.path.insert(0, str(Path(__file__).parent))
+# Adiciona o diretório pai (scrapers/) ao path para importar supabase_client
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def convert_brazilian_datetime_to_postgres(date_str: str) -> Optional[str]:
