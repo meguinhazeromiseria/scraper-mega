@@ -3,7 +3,7 @@
 """
 MEGALEILÕES - SCRAPER COMPLETO E CORRIGIDO
 ✅ Paginação automática detectando botão "Fim"
-✅ Extrai data e lances corretamente
+✅ Extrai data, lances e imagem corretamente
 ✅ Compatível 100% com tabela megaleiloes_items
 ✅ Usa ?pagina=N (não ?page=N)
 """
@@ -55,6 +55,7 @@ class MegaLeiloesScraper:
             'by_category': {},
             'duplicates': 0,
             'with_bids': 0,
+            'with_images': 0,
             'pages_scraped': 0,
         }
         
@@ -195,6 +196,9 @@ class MegaLeiloesScraper:
                         
                         if item.get('has_bid'):
                             self.stats['with_bids'] += 1
+                        
+                        if item.get('image_url'):
+                            self.stats['with_images'] += 1
                     elif item:
                         self.stats['duplicates'] += 1
                 
@@ -247,7 +251,7 @@ class MegaLeiloesScraper:
             if len(texto) < 20:
                 return None
             
-            # 4. Título
+            # 4. Título (prioriza .card-title)
             title_elem = card.select_one('.card-title')
             if title_elem:
                 title = title_elem.get_text(strip=True)
@@ -256,13 +260,22 @@ class MegaLeiloesScraper:
                 words = texto.split()[:15]
                 title = ' '.join(words)
             
-            # 5. Extrai informações de praça
+            # 5. Imagem (data-bg do a.card-image)
+            image_url = None
+            image_elem = card.select_one('a.card-image[data-bg]')
+            if image_elem:
+                image_url = image_elem.get('data-bg')
+                # Filtra imagem padrão "no-image"
+                if image_url and 'no-image' in image_url:
+                    image_url = None
+            
+            # 6. Extrai informações de praça
             auction_info = self._extract_auction_info_from_html(card)
             
-            # 6. Has bid (ícone fa-legal)
+            # 7. Has bid (ícone fa-legal)
             has_bid = self._extract_has_bid(card)
             
-            # 7. Valor
+            # 8. Valor
             value = auction_info.get('current_value')
             value_text = auction_info.get('current_value_text')
             
@@ -278,30 +291,52 @@ class MegaLeiloesScraper:
                         except:
                             pass
             
-            # 8. Estado (sigla UF)
-            state = None
-            state_match = re.search(r'\b([A-Z]{2})\b', texto)
-            if state_match:
-                uf = state_match.group(1)
-                if uf in self.valid_states:
-                    state = uf
-            
-            # 9. Cidade
+            # 9. Cidade e Estado (usa .card-locality se disponível)
             city = None
-            city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)*)\s*,\s*([A-Z]{2})\b', texto)
-            if city_match:
-                city = city_match.group(1).strip()
-                if not state:
-                    state = city_match.group(2)
+            state = None
             
-            # 10. Tipo de leilão
+            locality_elem = card.select_one('.card-locality')
+            if locality_elem:
+                locality_text = locality_elem.get_text(strip=True)
+                # Formato: "São João Del Rei, MG"
+                match = re.match(r'^(.+),\s*([A-Z]{2})$', locality_text)
+                if match:
+                    city = match.group(1).strip()
+                    state = match.group(2).strip()
+            
+            # Se não encontrou, tenta no texto geral
+            if not city or not state:
+                city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)*)\s*,\s*([A-Z]{2})\b', texto)
+                if city_match:
+                    if not city:
+                        city = city_match.group(1).strip()
+                    if not state:
+                        state = city_match.group(2)
+            
+            # 10. Tipo de leilão (usa .card-instance-title a)
             auction_type = None
-            if 'judicial' in texto.lower():
-                auction_type = 'Judicial'
-            elif 'extrajudicial' in texto.lower():
-                auction_type = 'Extrajudicial'
+            type_elem = card.select_one('.card-instance-title a')
+            if type_elem:
+                type_text = type_elem.get_text(strip=True)
+                if 'judicial' in type_text.lower():
+                    auction_type = 'Judicial'
+                elif 'extrajudicial' in type_text.lower():
+                    auction_type = 'Extrajudicial'
             
-            # 11. Constrói o item compatível com DB
+            # Se não encontrou, busca no texto
+            if not auction_type:
+                if 'judicial' in texto.lower():
+                    auction_type = 'Judicial'
+                elif 'extrajudicial' in texto.lower():
+                    auction_type = 'Extrajudicial'
+            
+            # 11. Número do lote (card-number)
+            batch_number = None
+            number_elem = card.select_one('.card-number')
+            if number_elem:
+                batch_number = number_elem.get_text(strip=True)
+            
+            # 12. Constrói o item compatível com DB
             item = {
                 'source': self.source,
                 'external_id': external_id,
@@ -318,7 +353,8 @@ class MegaLeiloesScraper:
                 'first_round_date': auction_info.get('first_round_date'),
                 'discount_percentage': auction_info.get('discount_percentage'),
                 'link': link,
-                'metadata': {},
+                'image_url': image_url,
+                'metadata': {'batch_number': batch_number} if batch_number else {},
                 'is_active': True,
                 'has_bid': has_bid,
                 'auction_type': auction_type,
@@ -450,6 +486,7 @@ def main():
     print(f"{'='*70}")
     print(f"✅ Total coletado: {len(items)} itens")
     print(f"📄 Páginas processadas: {scraper.stats['pages_scraped']}")
+    print(f"🖼️ Itens com imagens: {scraper.stats['with_images']}")
     print(f"🔥 Itens com lances: {scraper.stats['with_bids']}")
     print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
     
@@ -503,6 +540,7 @@ def main():
         print(f"    • {category}: {count} itens")
     print(f"\n  • Total coletado: {scraper.stats['total_scraped']}")
     print(f"  • Páginas processadas: {scraper.stats['pages_scraped']}")
+    print(f"  • Com imagens: {scraper.stats['with_images']}")
     print(f"  • Com lances: {scraper.stats['with_bids']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
     print(f"\n⏱️ Duração: {minutes}min {seconds}s")
