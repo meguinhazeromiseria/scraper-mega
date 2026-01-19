@@ -36,18 +36,10 @@ def convert_brazilian_datetime_to_postgres(date_str: str) -> Optional[str]:
 class MegaLeiloesScraper:
     """Scraper para MegaLeilões com mapeamento de categorias"""
     
-    def __init__(self, max_pages_per_section=50, headless=True, timeout=30000):
-        """
-        Args:
-            max_pages_per_section: Máximo de páginas por seção (default: 50)
-            headless: Se o browser deve rodar em modo headless (default: True)
-            timeout: Timeout em ms para carregar páginas (default: 30000)
-        """
+    def __init__(self):
+        """Inicializa scraper - coleta TODAS as páginas disponíveis"""
         self.source = 'megaleiloes'
         self.base_url = 'https://www.megaleiloes.com.br'
-        self.max_pages_per_section = max_pages_per_section
-        self.headless = headless
-        self.timeout = timeout
         
         # Mapeamento: (url_path, category, display_name)
         self.sections = [
@@ -169,14 +161,13 @@ class MegaLeiloesScraper:
     
     def _scrape_section(self, page, url_path: str, category: str,
                        display_name: str, global_ids: set) -> List[Dict]:
-        """Scrape uma seção específica"""
+        """Scrape uma seção específica - TODAS as páginas disponíveis"""
         items = []
         page_num = 1
         consecutive_empty = 0
-        max_empty = 2
-        max_pages = 50
+        max_empty = 3  # Para páginas vazias consecutivas antes de parar
         
-        while page_num <= max_pages:
+        while True:  # ✅ SEM LIMITE! Vai até acabar as páginas
             url = f"{self.base_url}/{url_path}?page={page_num}"
             
             try:
@@ -190,12 +181,15 @@ class MegaLeiloesScraper:
                 
                 if not cards:
                     consecutive_empty += 1
+                    print(f"    ⚠️ Página {page_num} vazia ({consecutive_empty}/{max_empty})")
                     if consecutive_empty >= max_empty:
+                        print(f"    ✅ Fim da categoria (sem mais itens)")
                         break
                     page_num += 1
                     continue
                 
                 consecutive_empty = 0
+                print(f"    📄 Página {page_num}: {len(cards)} cards encontrados")
                 
                 for card in cards:
                     item = self._parse_card(card, category)

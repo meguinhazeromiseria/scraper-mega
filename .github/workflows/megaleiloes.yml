@@ -3,11 +3,6 @@ name: 🟢 MegaLeilões - Scraper Completo
 on:
   # Execução manual
   workflow_dispatch:
-    inputs:
-      max_pages:
-        description: 'Máximo de páginas por categoria'
-        required: false
-        default: '50'
   
   # Cron automático - Todos os dias às 3h UTC (0h BRT)
   schedule:
@@ -47,14 +42,13 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          MAX_PAGES: ${{ github.event.inputs.max_pages || '50' }}
         run: |
           echo "========================================"
           echo "🟢 MEGALEILÕES - SCRAPER COMPLETO"
           echo "========================================"
           echo "📅 Início: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo "🇧🇷 Brasil: $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M:%S BRT')"
-          echo "📄 Max páginas por categoria: $MAX_PAGES"
+          echo "📄 Modo: TODAS as páginas disponíveis"
           echo "========================================"
           
           python scraper_megaleiloes.py
