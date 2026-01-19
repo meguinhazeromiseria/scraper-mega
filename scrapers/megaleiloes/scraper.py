@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MEGALEILÕES - SCRAPER CORRIGIDO
-✅ Usa a lógica do mega-test.py que funciona
-✅ Seletor CSS mais abrangente
-✅ Scroll para carregar conteúdo dinâmico
-✅ Filtros mais robustos
+MEGALEILÕES - SCRAPER COMPLETO E CORRIGIDO
+✅ Paginação automática detectando botão "Fim"
+✅ Extrai data e lances corretamente
+✅ Compatível 100% com tabela megaleiloes_items
+✅ Usa ?pagina=N (não ?page=N)
 """
 
 import sys
@@ -33,48 +33,21 @@ def convert_brazilian_datetime_to_postgres(date_str: str) -> Optional[str]:
 
 
 class MegaLeiloesScraper:
-    """Scraper para MegaLeilões com mapeamento de categorias"""
+    """Scraper para MegaLeilões com paginação automática"""
     
     def __init__(self):
-        """Inicializa scraper - coleta TODAS as páginas disponíveis"""
+        """Inicializa scraper"""
         self.source = 'megaleiloes'
         self.base_url = 'https://www.megaleiloes.com.br'
         
-        # Mapeamento: (url_path, category, display_name)
+        # Seções principais
         self.sections = [
-            # VEÍCULOS
-            ('veiculos/aeronaves', 'Aeronaves', 'Aeronaves'),
-            ('veiculos/barcos', 'Barcos', 'Barcos'),
-            ('veiculos/caminhoes', 'Caminhões', 'Caminhões'),
-            ('veiculos/carros', 'Carros', 'Carros'),
-            ('veiculos/motos', 'Motos', 'Motos'),
-            ('veiculos/onibus', 'Ônibus', 'Ônibus'),
-            
-            # IMÓVEIS
-            ('imoveis/apartamentos', 'Apartamentos', 'Apartamentos'),
-            ('imoveis/casas', 'Casas', 'Casas'),
-            ('imoveis/galpoes--industriais', 'Galpões Industriais', 'Galpões Industriais'),
-            ('imoveis/glebas', 'Glebas', 'Glebas'),
-            ('imoveis/deposito-de-garagem', 'Depósito de Garagem', 'Depósito de Garagem'),
-            ('imoveis/hospitais', 'Hospitais', 'Hospitais'),
-            ('imoveis/hoteis', 'Hotéis', 'Hotéis'),
-            ('imoveis/imoveis-comerciais', 'Imóveis Comerciais', 'Imóveis Comerciais'),
-            ('imoveis/imoveis-rurais', 'Imóveis Rurais', 'Imóveis Rurais'),
-            ('imoveis/outros', 'Outros Imóveis', 'Outros Imóveis'),
-            ('imoveis/resorts', 'Resorts', 'Resorts'),
-            ('imoveis/terrenos-e-lotes', 'Terrenos e Lotes', 'Terrenos e Lotes'),
-            ('imoveis/terrenos-para-incorporacao', 'Terrenos p/ Incorporação', 'Terrenos p/ Incorporação'),
-            ('imoveis/vagas-de-garagem', 'Vagas de Garagem', 'Vagas de Garagem'),
-            
-            # OUTROS
-            ('bens-de-consumo/eletrodomesticos', 'Eletrodomésticos', 'Eletrodomésticos'),
-            ('bens-de-consumo/eletronicos', 'Eletrônicos', 'Eletrônicos'),
-            ('bens-de-consumo/moveis', 'Móveis', 'Móveis'),
-            ('industrial/maquinas', 'Máquinas Industriais', 'Máquinas Industriais'),
-            ('animais/cavalos', 'Cavalos', 'Cavalos'),
-            ('animais/gado-bovino', 'Gado Bovino', 'Gado Bovino'),
-            ('outros/diversos', 'Diversos', 'Diversos'),
-            ('outros/obras-de-arte', 'Obras de Arte', 'Obras de Arte'),
+            ('imoveis', 'Imóveis', 'Imóveis'),
+            ('veiculos', 'Veículos', 'Veículos'),
+            ('bens-de-consumo', 'Bens de Consumo', 'Bens de Consumo'),
+            ('industrial', 'Industrial', 'Industrial'),
+            ('animais', 'Animais', 'Animais'),
+            ('outros', 'Outros', 'Outros'),
         ]
         
         self.stats = {
@@ -82,6 +55,7 @@ class MegaLeiloesScraper:
             'by_category': {},
             'duplicates': 0,
             'with_bids': 0,
+            'pages_scraped': 0,
         }
         
         # Estados brasileiros válidos
@@ -89,22 +63,12 @@ class MegaLeiloesScraper:
             'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
             'PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
         ]
-        
-        # URLs para filtrar
-        self.invalid_url_endings = [
-            '/imoveis', '/veiculos', '/bens-de-consumo', '/industrial', 
-            '/animais', '/outros', '/carros', '/motos', '/apartamentos',
-            '/casas', '/terrenos', '/lotes', '/galpoes', '/barcos',
-            '/caminhoes', '/onibus', '/aeronaves', '/cavalos', '/gado',
-            '/eletrodomesticos', '/eletronicos', '/moveis', '/maquinas',
-            '/diversos', '/obras-de-arte', '/leiloes-judiciais'
-        ]
     
     def scrape(self) -> List[Dict]:
-        """Scrape completo do MegaLeilões - retorna lista de itens"""
-        print("\n" + "="*60)
-        print("🟢 MEGALEILÕES - SCRAPER")
-        print("="*60)
+        """Scrape completo do MegaLeilões"""
+        print("\n" + "="*70)
+        print("🟢 MEGALEILÕES - SCRAPER COMPLETO")
+        print("="*70)
         
         all_items = []
         global_ids = set()
@@ -122,7 +86,9 @@ class MegaLeiloesScraper:
                 page = context.new_page()
                 
                 for url_path, category, display_name in self.sections:
-                    print(f"\n📦 {display_name}")
+                    print(f"\n{'='*70}")
+                    print(f"📦 {display_name}")
+                    print(f"{'='*70}")
                     
                     section_items = self._scrape_section(
                         page, url_path, category, display_name, global_ids
@@ -131,7 +97,7 @@ class MegaLeiloesScraper:
                     all_items.extend(section_items)
                     self.stats['by_category'][category] = len(section_items)
                     
-                    print(f"✅ {len(section_items)} itens")
+                    print(f"✅ {len(section_items)} itens coletados de {display_name}")
                     
                     time.sleep(2)
                 
@@ -139,50 +105,84 @@ class MegaLeiloesScraper:
         
         except Exception as e:
             print(f"❌ Erro geral: {e}")
+            import traceback
+            traceback.print_exc()
         
         self.stats['total_scraped'] = len(all_items)
         return all_items
     
+    def _get_max_page(self, soup) -> int:
+        """Detecta o número máximo de páginas pelo botão 'Fim'"""
+        try:
+            # Procura pelo botão "Fim" na paginação
+            last_link = soup.select_one('ul.pagination li.last a')
+            if last_link:
+                href = last_link.get('href', '')
+                # Extrai número da página do URL
+                match = re.search(r'pagina=(\d+)', href)
+                if match:
+                    return int(match.group(1))
+            
+            # Se não encontrar, tenta pelos links de página
+            page_links = soup.select('ul.pagination li a[data-page]')
+            if page_links:
+                pages = []
+                for link in page_links:
+                    href = link.get('href', '')
+                    match = re.search(r'pagina=(\d+)', href)
+                    if match:
+                        pages.append(int(match.group(1)))
+                if pages:
+                    return max(pages)
+            
+            return 1
+            
+        except Exception:
+            return 1
+    
     def _scrape_section(self, page, url_path: str, category: str,
                        display_name: str, global_ids: set) -> List[Dict]:
-        """Scrape uma seção específica - TODAS as páginas disponíveis"""
+        """Scrape uma seção específica - todas as páginas"""
         items = []
-        page_num = 1
-        consecutive_empty = 0
-        max_empty = 3
         
-        while True:
-            # Monta URL - primeira página sem ?page=1
-            if page_num == 1:
-                url = f"{self.base_url}/{url_path}"
-            else:
-                url = f"{self.base_url}/{url_path}?page={page_num}"
+        # Primeiro acessa a página 1 para descobrir quantas páginas existem
+        url = f"{self.base_url}/{url_path}"
+        
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(3)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2)
             
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                time.sleep(3)
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Detecta o número máximo de páginas
+            max_page = self._get_max_page(soup)
+            print(f"📄 Total de páginas detectadas: {max_page}")
+            
+            # Agora scrape todas as páginas
+            for page_num in range(1, max_page + 1):
+                if page_num == 1:
+                    current_url = url
+                    current_soup = soup
+                else:
+                    current_url = f"{url}?pagina={page_num}"
+                    page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
+                    time.sleep(3)
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(2)
+                    current_html = page.content()
+                    current_soup = BeautifulSoup(current_html, 'html.parser')
                 
-                # Scroll para carregar conteúdo dinâmico
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(2)
-                
-                html = page.content()
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # ✅ Seletor mais abrangente (igual ao mega-test.py)
-                cards = soup.select('div.card, .leilao-card, div[class*="card"]')
+                # Extrai cards
+                cards = current_soup.select('div.card')
                 
                 if not cards:
-                    consecutive_empty += 1
-                    print(f"    ⚠️ Página {page_num} vazia ({consecutive_empty}/{max_empty})")
-                    if consecutive_empty >= max_empty:
-                        print(f"    ✅ Fim da categoria (sem mais itens)")
-                        break
-                    page_num += 1
+                    print(f"  ⚠️ Página {page_num}/{max_page}: Nenhum card encontrado")
                     continue
                 
-                consecutive_empty = 0
-                print(f"    📄 Página {page_num}: {len(cards)} cards encontrados")
+                print(f"  📄 Página {page_num}/{max_page}: {len(cards)} cards encontrados")
                 
                 page_items = 0
                 for card in cards:
@@ -198,26 +198,21 @@ class MegaLeiloesScraper:
                     elif item:
                         self.stats['duplicates'] += 1
                 
-                print(f"    ✅ {page_items} itens válidos extraídos")
+                self.stats['pages_scraped'] += 1
+                print(f"  ✅ {page_items} itens válidos extraídos da página {page_num}")
                 
-                # Se não extraiu nenhum item válido, pode ter acabado
-                if page_items == 0:
-                    consecutive_empty += 1
-                    if consecutive_empty >= max_empty:
-                        print(f"    ✅ Fim da categoria (sem itens válidos)")
-                        break
-                
-                page_num += 1
-                
-            except Exception as e:
-                print(f"    ⚠️ Erro na página {page_num}: {e}")
-                page_num += 1
-                continue
+                # Delay entre páginas
+                time.sleep(2)
+        
+        except Exception as e:
+            print(f"❌ Erro ao processar seção: {e}")
+            import traceback
+            traceback.print_exc()
         
         return items
     
     def _parse_card(self, card, category: str) -> Optional[Dict]:
-        """Parse de um card de leilão - formato megaleiloes_items"""
+        """Parse de um card de leilão"""
         try:
             # 1. Extrai link
             link_elem = card.select_one('a[href]')
@@ -225,63 +220,65 @@ class MegaLeiloesScraper:
                 return None
             
             link = link_elem.get('href', '')
-            if not link or 'javascript' in link:
+            if not link or 'javascript' in link.lower():
                 return None
             
             if not link.startswith('http'):
                 link = f"{self.base_url}{link}"
             
-            link_clean = link.rstrip('/')
+            # Remove parâmetros UTM
+            link_clean = link.split('?')[0].rstrip('/')
             
-            # 2. Filtra URLs inválidas
-            if any(link_clean.endswith(ending) for ending in self.invalid_url_endings):
-                return None
-            
-            # 3. Extrai external_id do link
+            # 2. Extrai external_id do link
             external_id = None
-            parts = link.rstrip('/').split('/')
+            parts = link_clean.split('/')
             for part in reversed(parts):
                 if part and not part.startswith('?'):
-                    external_id = f"{self.source}_{part.split('?')[0]}"
+                    external_id = f"{self.source}_{part}"
                     break
             
             if not external_id or external_id == f'{self.source}_':
                 return None
             
-            # 4. Extrai texto completo
+            # 3. Extrai texto completo
             texto = card.get_text(separator=' ', strip=True)
             
-            # Filtra cards de paginação e muito curtos
-            texto_lower = texto.lower()
-            if 'exibindo' in texto_lower and 'itens' in texto_lower:
+            # Filtra cards muito curtos
+            if len(texto) < 20:
                 return None
             
-            if len(texto) < 10:
-                return None
+            # 4. Título
+            title_elem = card.select_one('.card-title')
+            if title_elem:
+                title = title_elem.get_text(strip=True)
+            else:
+                # Pega primeiras palavras do texto
+                words = texto.split()[:15]
+                title = ' '.join(words)
             
-            # 5. Título
-            title = texto[:150].strip() if texto else "Sem Título"
-            
-            # 6. ✅ Extrai informações de praça do HTML
+            # 5. Extrai informações de praça
             auction_info = self._extract_auction_info_from_html(card)
             
-            # 7. Has bid
+            # 6. Has bid (ícone fa-legal)
             has_bid = self._extract_has_bid(card)
             
-            # 8. Valor (prioriza do auction_info, senão busca no texto)
+            # 7. Valor
             value = auction_info.get('current_value')
             value_text = auction_info.get('current_value_text')
             
             if not value:
-                price_match = re.search(r'R\$\s*([\d.]+,\d{2})', texto)
-                if price_match:
-                    value_text = f"R$ {price_match.group(1)}"
-                    try:
-                        value = float(price_match.group(1).replace('.', '').replace(',', '.'))
-                    except:
-                        pass
+                price_elem = card.select_one('.card-price')
+                if price_elem:
+                    price_text = price_elem.get_text(strip=True)
+                    price_match = re.search(r'R\$\s*([\d.]+,\d{2})', price_text)
+                    if price_match:
+                        value_text = f"R$ {price_match.group(1)}"
+                        try:
+                            value = float(price_match.group(1).replace('.', '').replace(',', '.'))
+                        except:
+                            pass
             
-            # 9. Estado (sigla UF)
+            # 8. Estado (sigla UF)
             state = None
             state_match = re.search(r'\b([A-Z]{2})\b', texto)
             if state_match:
@@ -289,17 +286,22 @@ class MegaLeiloesScraper:
                 if uf in self.valid_states:
                     state = uf
             
-            # 10. Cidade
+            # 9. Cidade
             city = None
-            city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú\s]+)\s*[-–/,]\s*[A-Z]{2}', texto)
+            city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)*)\s*,\s*([A-Z]{2})\b', texto)
             if city_match:
                 city = city_match.group(1).strip()
+                if not state:
+                    state = city_match.group(2)
             
-            # 11. Tipo de leilão
-            auction_type_elem = card.select_one('.card-auction-type')
-            auction_type = auction_type_elem.get_text(strip=True) if auction_type_elem else None
+            # 10. Tipo de leilão
+            auction_type = None
+            if 'judicial' in texto.lower():
+                auction_type = 'Judicial'
+            elif 'extrajudicial' in texto.lower():
+                auction_type = 'Extrajudicial'
             
-            # 12. Constrói o item
+            # 11. Constrói o item compatível com DB
             item = {
                 'source': self.source,
                 'external_id': external_id,
@@ -324,22 +326,22 @@ class MegaLeiloesScraper:
             
             return item
             
-        except Exception as e:
+        except Exception:
             return None
     
     def _extract_has_bid(self, card) -> bool:
-        """Verifica se o item tem lances"""
+        """Verifica se o item tem lances - procura pelo ícone fa-legal"""
         try:
-            bid_info = card.select_one('.card-bid-info')
-            if bid_info:
-                spans = bid_info.select('span')
-                for span in spans:
-                    if 'lance' in span.get_text(strip=True).lower():
-                        text = span.get_text(strip=True)
-                        numbers = re.findall(r'\d+', text)
-                        if numbers:
-                            bid_count = int(numbers[0])
-                            return bid_count > 0
+            legal_icon = card.select_one('i.fa-legal')
+            
+            if legal_icon:
+                parent_span = legal_icon.find_parent('span')
+                if parent_span:
+                    text = parent_span.get_text(strip=True)
+                    numbers = re.findall(r'\d+', text)
+                    if numbers:
+                        bid_count = int(numbers[0])
+                        return bid_count > 0
             
             return False
             
@@ -432,7 +434,7 @@ class MegaLeiloesScraper:
 def main():
     """Execução principal"""
     print("\n" + "="*70)
-    print("🚀 MEGALEILÕES - SCRAPER")
+    print("🚀 MEGALEILÕES - SCRAPER COMPLETO")
     print("="*70)
     print(f"📅 Início: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
@@ -443,12 +445,16 @@ def main():
     scraper = MegaLeiloesScraper()
     items = scraper.scrape()
     
-    print(f"\n✅ Total coletado: {len(items)} itens")
+    print(f"\n{'='*70}")
+    print(f"📊 RESULTADO FINAL")
+    print(f"{'='*70}")
+    print(f"✅ Total coletado: {len(items)} itens")
+    print(f"📄 Páginas processadas: {scraper.stats['pages_scraped']}")
     print(f"🔥 Itens com lances: {scraper.stats['with_bids']}")
     print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
     
     if not items:
-        print("⚠️ Nenhum item coletado - encerrando")
+        print("\n⚠️ Nenhum item coletado - encerrando")
         return
     
     # Salva JSON
@@ -459,13 +465,16 @@ def main():
     
     with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(items, f, ensure_ascii=False, indent=2)
-    print(f"💾 JSON salvo: {json_file}")
+    print(f"\n💾 JSON salvo: {json_file}")
     
     # Importa e usa o cliente Supabase
     try:
         from supabase_client import SupabaseMegaLeiloes
         
-        print("\n📤 INSERINDO NO SUPABASE")
+        print(f"\n{'='*70}")
+        print("📤 INSERINDO NO SUPABASE")
+        print(f"{'='*70}")
+        
         supabase = SupabaseMegaLeiloes()
         
         if not supabase.test():
@@ -480,24 +489,25 @@ def main():
                 print(f"    ⚠️ Erros: {stats['errors']}")
     
     except Exception as e:
-        print(f"⚠️ Erro no Supabase: {e}")
+        print(f"\n⚠️ Erro no Supabase: {e}")
     
     elapsed = time.time() - start_time
     minutes = int(elapsed // 60)
     seconds = int(elapsed % 60)
     
-    print("\n" + "="*70)
+    print(f"\n{'='*70}")
     print("📊 ESTATÍSTICAS FINAIS")
-    print("="*70)
+    print(f"{'='*70}")
     print(f"\n  Por Categoria:")
     for category, count in sorted(scraper.stats['by_category'].items()):
         print(f"    • {category}: {count} itens")
     print(f"\n  • Total coletado: {scraper.stats['total_scraped']}")
+    print(f"  • Páginas processadas: {scraper.stats['pages_scraped']}")
     print(f"  • Com lances: {scraper.stats['with_bids']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
     print(f"\n⏱️ Duração: {minutes}min {seconds}s")
     print(f"✅ Concluído: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("="*70)
+    print(f"{'='*70}")
 
 
 if __name__ == "__main__":
