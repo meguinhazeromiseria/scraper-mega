@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MEGALEILÕES - SCRAPER DIRETO PARA megaleiloes_items
-✅ Remove dependência do normalizer
-✅ Salva diretamente na tabela megaleiloes_items
-✅ Extrai has_bid do HTML
-✅ Mantém informações de praça (auction_round, discount_percentage, etc)
+MEGALEILÕES - SCRAPER CORRIGIDO
+✅ Usa a lógica do mega-test.py que funciona
+✅ Seletor CSS mais abrangente
+✅ Scroll para carregar conteúdo dinâmico
+✅ Filtros mais robustos
 """
 
 import sys
@@ -17,7 +17,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 
-# Imports do scraper
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
@@ -84,6 +83,22 @@ class MegaLeiloesScraper:
             'duplicates': 0,
             'with_bids': 0,
         }
+        
+        # Estados brasileiros válidos
+        self.valid_states = [
+            'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
+            'PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
+        ]
+        
+        # URLs para filtrar
+        self.invalid_url_endings = [
+            '/imoveis', '/veiculos', '/bens-de-consumo', '/industrial', 
+            '/animais', '/outros', '/carros', '/motos', '/apartamentos',
+            '/casas', '/terrenos', '/lotes', '/galpoes', '/barcos',
+            '/caminhoes', '/onibus', '/aeronaves', '/cavalos', '/gado',
+            '/eletrodomesticos', '/eletronicos', '/moveis', '/maquinas',
+            '/diversos', '/obras-de-arte', '/leiloes-judiciais'
+        ]
     
     def scrape(self) -> List[Dict]:
         """Scrape completo do MegaLeilões - retorna lista de itens"""
@@ -94,8 +109,6 @@ class MegaLeiloesScraper:
         all_items = []
         global_ids = set()
         
-        cookies_raw = self._get_cookies()
-        
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
@@ -105,9 +118,6 @@ class MegaLeiloesScraper:
                     viewport={'width': 1920, 'height': 1080},
                     locale='pt-BR'
                 )
-                
-                if cookies_raw:
-                    context.add_cookies(cookies_raw)
                 
                 page = context.new_page()
                 
@@ -133,51 +143,34 @@ class MegaLeiloesScraper:
         self.stats['total_scraped'] = len(all_items)
         return all_items
     
-    def _get_cookies(self) -> List[dict]:
-        """Captura cookies do MegaLeilões"""
-        print("  🍪 Capturando cookies...")
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    viewport={'width': 1920, 'height': 1080},
-                    locale='pt-BR'
-                )
-                
-                page = context.new_page()
-                page.goto(self.base_url, wait_until="domcontentloaded", timeout=30000)
-                time.sleep(3)
-                
-                cookies = context.cookies()
-                browser.close()
-                
-                print(f"    ✅ {len(cookies)} cookies capturados")
-                return cookies
-                
-        except Exception as e:
-            print(f"    ⚠️ Erro ao capturar cookies: {e}")
-            return []
-    
     def _scrape_section(self, page, url_path: str, category: str,
                        display_name: str, global_ids: set) -> List[Dict]:
         """Scrape uma seção específica - TODAS as páginas disponíveis"""
         items = []
         page_num = 1
         consecutive_empty = 0
-        max_empty = 3  # Para páginas vazias consecutivas antes de parar
+        max_empty = 3
         
-        while True:  # ✅ SEM LIMITE! Vai até acabar as páginas
-            url = f"{self.base_url}/{url_path}?page={page_num}"
+        while True:
+            # Monta URL - primeira página sem ?page=1
+            if page_num == 1:
+                url = f"{self.base_url}/{url_path}"
+            else:
+                url = f"{self.base_url}/{url_path}?page={page_num}"
             
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                time.sleep(3)
+                
+                # Scroll para carregar conteúdo dinâmico
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 time.sleep(2)
                 
                 html = page.content()
                 soup = BeautifulSoup(html, 'html.parser')
                 
-                cards = soup.select('div.card')
+                # ✅ Seletor mais abrangente (igual ao mega-test.py)
+                cards = soup.select('div.card, .leilao-card, div[class*="card"]')
                 
                 if not cards:
                     consecutive_empty += 1
@@ -191,17 +184,28 @@ class MegaLeiloesScraper:
                 consecutive_empty = 0
                 print(f"    📄 Página {page_num}: {len(cards)} cards encontrados")
                 
+                page_items = 0
                 for card in cards:
                     item = self._parse_card(card, category)
                     
                     if item and item['external_id'] not in global_ids:
                         items.append(item)
                         global_ids.add(item['external_id'])
+                        page_items += 1
                         
                         if item.get('has_bid'):
                             self.stats['with_bids'] += 1
                     elif item:
                         self.stats['duplicates'] += 1
+                
+                print(f"    ✅ {page_items} itens válidos extraídos")
+                
+                # Se não extraiu nenhum item válido, pode ter acabado
+                if page_items == 0:
+                    consecutive_empty += 1
+                    if consecutive_empty >= max_empty:
+                        print(f"    ✅ Fim da categoria (sem itens válidos)")
+                        break
                 
                 page_num += 1
                 
@@ -215,60 +219,97 @@ class MegaLeiloesScraper:
     def _parse_card(self, card, category: str) -> Optional[Dict]:
         """Parse de um card de leilão - formato megaleiloes_items"""
         try:
-            # Link e external_id
-            link_elem = card.select_one('a.card-link')
-            if not link_elem or not link_elem.get('href'):
+            # 1. Extrai link
+            link_elem = card.select_one('a[href]')
+            if not link_elem:
                 return None
             
-            link = link_elem['href']
+            link = link_elem.get('href', '')
+            if not link or 'javascript' in link:
+                return None
+            
             if not link.startswith('http'):
-                link = self.base_url + link
+                link = f"{self.base_url}{link}"
             
-            # External ID da URL
-            external_id = f"{self.source}_{link.split('/')[-1].split('?')[0]}"
+            link_clean = link.rstrip('/')
             
-            # Título
-            title_elem = card.select_one('.card-title')
-            title = title_elem.get_text(strip=True) if title_elem else 'Sem Título'
+            # 2. Filtra URLs inválidas
+            if any(link_clean.endswith(ending) for ending in self.invalid_url_endings):
+                return None
             
-            # Descrição (todo o texto do card)
-            description = card.get_text(separator=' ', strip=True)
+            # 3. Extrai external_id do link
+            external_id = None
+            parts = link.rstrip('/').split('/')
+            for part in reversed(parts):
+                if part and not part.startswith('?'):
+                    external_id = f"{self.source}_{part.split('?')[0]}"
+                    break
             
-            # Localização
-            location_elem = card.select_one('.card-location')
-            city = None
-            state = None
+            if not external_id or external_id == f'{self.source}_':
+                return None
             
-            if location_elem:
-                location_text = location_elem.get_text(strip=True)
-                if ',' in location_text:
-                    parts = location_text.split(',')
-                    city = parts[0].strip()
-                    state_raw = parts[1].strip()
-                    if len(state_raw) == 2:
-                        state = state_raw.upper()
+            # 4. Extrai texto completo
+            texto = card.get_text(separator=' ', strip=True)
             
-            # Informações de praça
+            # Filtra cards de paginação e muito curtos
+            texto_lower = texto.lower()
+            if 'exibindo' in texto_lower and 'itens' in texto_lower:
+                return None
+            
+            if len(texto) < 10:
+                return None
+            
+            # 5. Título
+            title = texto[:150].strip() if texto else "Sem Título"
+            
+            # 6. ✅ Extrai informações de praça do HTML
             auction_info = self._extract_auction_info_from_html(card)
             
-            # Has bid
+            # 7. Has bid
             has_bid = self._extract_has_bid(card)
             
-            # Tipo de leilão
+            # 8. Valor (prioriza do auction_info, senão busca no texto)
+            value = auction_info.get('current_value')
+            value_text = auction_info.get('current_value_text')
+            
+            if not value:
+                price_match = re.search(r'R\$\s*([\d.]+,\d{2})', texto)
+                if price_match:
+                    value_text = f"R$ {price_match.group(1)}"
+                    try:
+                        value = float(price_match.group(1).replace('.', '').replace(',', '.'))
+                    except:
+                        pass
+            
+            # 9. Estado (sigla UF)
+            state = None
+            state_match = re.search(r'\b([A-Z]{2})\b', texto)
+            if state_match:
+                uf = state_match.group(1)
+                if uf in self.valid_states:
+                    state = uf
+            
+            # 10. Cidade
+            city = None
+            city_match = re.search(r'([A-ZÀ-Ú][a-zà-ú\s]+)\s*[-–/,]\s*[A-Z]{2}', texto)
+            if city_match:
+                city = city_match.group(1).strip()
+            
+            # 11. Tipo de leilão
             auction_type_elem = card.select_one('.card-auction-type')
             auction_type = auction_type_elem.get_text(strip=True) if auction_type_elem else None
             
-            # Constrói o item no formato da tabela megaleiloes_items
+            # 12. Constrói o item
             item = {
                 'source': self.source,
                 'external_id': external_id,
                 'category': category,
                 'title': title,
-                'description': description,
+                'description': texto,
                 'city': city,
                 'state': state,
-                'value': auction_info.get('current_value'),
-                'value_text': auction_info.get('current_value_text'),
+                'value': value,
+                'value_text': value_text,
                 'auction_round': auction_info.get('auction_round'),
                 'auction_date': auction_info.get('auction_date'),
                 'first_round_value': auction_info.get('first_round_value'),
@@ -317,11 +358,11 @@ class MegaLeiloesScraper:
             'discount_percentage': None,
         }
         
-        # Praça ativa
+        # Praça ativa (atual)
         active_instance = card.select_one('.instance.active')
         
         if active_instance:
-            # Verifica se é 2ª praça
+            # Verifica se é segunda praça
             second_date = active_instance.select_one('.card-second-instance-date')
             first_date = active_instance.select_one('.card-first-instance-date')
             
@@ -341,7 +382,7 @@ class MegaLeiloesScraper:
                     date_str = f"{date_match.group(1)} {date_match.group(2)}"
                     info['auction_date'] = convert_brazilian_datetime_to_postgres(date_str)
             
-            # Valor da praça ativa
+            # Valor atual
             value_elem = active_instance.select_one('.card-instance-value')
             if value_elem:
                 value_text = value_elem.get_text(strip=True)
@@ -354,9 +395,10 @@ class MegaLeiloesScraper:
                     except:
                         pass
         
-        # Primeira praça (se passou)
+        # Primeira praça (histórico)
         first_instance = card.select_one('.instance.first.passed')
         if first_instance:
+            # Data da primeira praça
             date_elem = first_instance.select_one('.card-first-instance-date')
             if date_elem:
                 date_text = date_elem.get_text(strip=True)
@@ -365,6 +407,7 @@ class MegaLeiloesScraper:
                     date_str = f"{date_match.group(1)} {date_match.group(2)}"
                     info['first_round_date'] = convert_brazilian_datetime_to_postgres(date_str)
             
+            # Valor da primeira praça
             value_elem = first_instance.select_one('.card-instance-value')
             if value_elem:
                 value_text = value_elem.get_text(strip=True)
@@ -375,7 +418,7 @@ class MegaLeiloesScraper:
                     except:
                         pass
         
-        # Calcula percentual de desconto
+        # Calcula desconto (se for segunda praça)
         if info['first_round_value'] and info['current_value'] and info['auction_round'] == 2:
             try:
                 discount = ((info['first_round_value'] - info['current_value']) / info['first_round_value']) * 100
