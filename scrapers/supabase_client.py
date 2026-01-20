@@ -5,6 +5,7 @@ SUPABASE CLIENT - MEGALEILOES_ITEMS
 ✅ Cliente específico para tabela megaleiloes_items
 ✅ Suporta todos os campos incluindo image_url
 ✅ Validação de dados conforme schema
+✅ UPSERT correto com on_conflict=external_id
 """
 
 import os
@@ -63,7 +64,8 @@ class SupabaseMegaLeiloes:
         batch_size = 500
         total_batches = (len(prepared) + batch_size - 1) // batch_size
         
-        url = f"{self.url}/rest/v1/{self.table}"
+        # URL com on_conflict para fazer UPSERT correto
+        url = f"{self.url}/rest/v1/{self.table}?on_conflict=external_id"
         
         for i in range(0, len(prepared), batch_size):
             batch = prepared[i:i+batch_size]
@@ -73,11 +75,10 @@ class SupabaseMegaLeiloes:
                 r = self.session.post(url, json=batch, timeout=120)
                 
                 if r.status_code in (200, 201):
+                    # Com on_conflict, todos são considerados "upserted"
+                    # Não temos como distinguir insert vs update facilmente
                     stats['inserted'] += len(batch)
-                    print(f"  ✅ Batch {batch_num}/{total_batches}: {len(batch)} itens")
-                elif r.status_code == 409:
-                    stats['updated'] += len(batch)
-                    print(f"  🔄 Batch {batch_num}/{total_batches}: {len(batch)} atualizados")
+                    print(f"  ✅ Batch {batch_num}/{total_batches}: {len(batch)} itens (insert/update)")
                 else:
                     error_msg = r.text[:200] if r.text else 'Sem detalhes'
                     print(f"  ❌ Batch {batch_num}: HTTP {r.status_code} - {error_msg}")
