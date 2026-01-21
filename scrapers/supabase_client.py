@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SUPABASE CLIENT - MEGALEILOES_ITEMS
+SUPABASE CLIENT - MEGALEILOES_ITEMS + HEARTBEAT
 ✅ Cliente específico para tabela megaleiloes_items
-✅ Suporta todos os campos incluindo image_url
+✅ Sistema de heartbeat integrado (infra_actions)
 ✅ Validação de dados conforme schema
 ✅ UPSERT correto com on_conflict=external_id
 """
@@ -11,14 +11,15 @@ SUPABASE CLIENT - MEGALEILOES_ITEMS
 import os
 import time
 import requests
+import traceback
 from datetime import datetime
 from typing import List, Dict, Optional
 
 
 class SupabaseMegaLeiloes:
-    """Cliente Supabase para tabela megaleiloes_items"""
+    """Cliente Supabase para tabela megaleiloes_items com heartbeat integrado"""
     
-    def __init__(self):
+    def __init__(self, service_name: str = 'megaleiloes_scraper'):
         self.url = os.getenv('SUPABASE_URL')
         self.key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
         
@@ -39,6 +40,142 @@ class SupabaseMegaLeiloes:
         
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+        
+        # ============================================
+        # HEARTBEAT - Configuração
+        # ============================================
+        self.service_name = service_name
+        self.heartbeat_enabled = True
+        self.heartbeat_start_time = time.time()
+        self.heartbeat_metrics = {
+            'items_processed': 0,
+            'pages_scraped': 0,
+            'errors': 0,
+            'warnings': 0,
+        }
+    
+    # ============================================
+    # MÉTODOS HEARTBEAT
+    # ============================================
+    
+    def _send_heartbeat(self, status: str, logs: Optional[Dict] = None, 
+                        error_message: Optional[str] = None, 
+                        metadata: Optional[Dict] = None) -> bool:
+        """Envia heartbeat para infra_actions"""
+        if not self.heartbeat_enabled:
+            return False
+        
+        try:
+            elapsed = time.time() - self.heartbeat_start_time
+            
+            full_logs = {
+                'timestamp': datetime.now().isoformat(),
+                'elapsed_seconds': round(elapsed, 2),
+                'metrics': self.heartbeat_metrics.copy(),
+                **(logs or {})
+            }
+            
+            payload = {
+                'service_name': self.service_name,
+                'service_type': 'scraper',
+                'status': status,
+                'last_activity': datetime.now().isoformat(),
+                'logs': full_logs,
+                'error_message': error_message,
+                'metadata': metadata or {}
+            }
+            
+            # Remove Content-Profile temporariamente para infra_actions (schema public)
+            temp_headers = self.headers.copy()
+            temp_headers.pop('Content-Profile', None)
+            temp_headers.pop('Accept-Profile', None)
+            
+            url = f"{self.url}/rest/v1/infra_actions?on_conflict=service_name"
+            r = self.session.post(url, json=[payload], headers=temp_headers, timeout=30)
+            
+            return r.status_code in (200, 201)
+                
+        except Exception as e:
+            print(f"⚠️ Erro ao enviar heartbeat: {e}")
+            return False
+    
+    def heartbeat_start(self, custom_logs: Optional[Dict] = None) -> bool:
+        """Registra início da execução do scraper"""
+        logs = {
+            'event': 'start',
+            'message': 'Scraper iniciado',
+            **(custom_logs or {})
+        }
+        result = self._send_heartbeat(status='active', logs=logs)
+        if result:
+            print("💓 Heartbeat: Início registrado")
+        return result
+    
+    def heartbeat_progress(self, items_processed: int = 0, pages_scraped: int = 0,
+                          custom_logs: Optional[Dict] = None) -> bool:
+        """Atualiza progresso durante execução"""
+        self.heartbeat_metrics['items_processed'] += items_processed
+        self.heartbeat_metrics['pages_scraped'] += pages_scraped
+        
+        logs = {
+            'event': 'progress',
+            'message': f"Processados {self.heartbeat_metrics['items_processed']} itens",
+            **(custom_logs or {})
+        }
+        
+        return self._send_heartbeat(status='active', logs=logs)
+    
+    def heartbeat_success(self, final_stats: Optional[Dict] = None) -> bool:
+        """Registra conclusão com sucesso"""
+        logs = {
+            'event': 'completed',
+            'message': 'Scraper concluído com sucesso',
+            'final_stats': final_stats or {},
+        }
+        result = self._send_heartbeat(status='active', logs=logs)
+        if result:
+            print("💓 Heartbeat: Sucesso registrado")
+        return result
+    
+    def heartbeat_error(self, error: Exception, context: Optional[str] = None) -> bool:
+        """Registra erro durante execução"""
+        self.heartbeat_metrics['errors'] += 1
+        
+        error_message = f"{type(error).__name__}: {str(error)}"
+        if context:
+            error_message = f"[{context}] {error_message}"
+        
+        logs = {
+            'event': 'error',
+            'error_type': type(error).__name__,
+            'traceback': traceback.format_exc(),
+            'context': context
+        }
+        
+        result = self._send_heartbeat(
+            status='error',
+            logs=logs,
+            error_message=error_message
+        )
+        if result:
+            print("💓 Heartbeat: Erro registrado")
+        return result
+    
+    def heartbeat_warning(self, message: str, details: Optional[Dict] = None) -> bool:
+        """Registra warning"""
+        self.heartbeat_metrics['warnings'] += 1
+        
+        logs = {
+            'event': 'warning',
+            'message': message,
+            'details': details or {}
+        }
+        
+        return self._send_heartbeat(status='warning', logs=logs)
+    
+    # ============================================
+    # MÉTODOS ORIGINAIS MEGALEILOES
+    # ============================================
     
     def upsert(self, items: List[Dict]) -> Dict:
         """Upsert de itens na tabela megaleiloes_items"""
@@ -75,10 +212,14 @@ class SupabaseMegaLeiloes:
                 r = self.session.post(url, json=batch, timeout=120)
                 
                 if r.status_code in (200, 201):
-                    # Com on_conflict, todos são considerados "upserted"
-                    # Não temos como distinguir insert vs update facilmente
                     stats['inserted'] += len(batch)
                     print(f"  ✅ Batch {batch_num}/{total_batches}: {len(batch)} itens (insert/update)")
+                    
+                    # Atualiza heartbeat a cada batch
+                    self.heartbeat_progress(
+                        items_processed=len(batch),
+                        custom_logs={'batch': batch_num, 'total_batches': total_batches}
+                    )
                 else:
                     error_msg = r.text[:200] if r.text else 'Sem detalhes'
                     print(f"  ❌ Batch {batch_num}: HTTP {r.status_code} - {error_msg}")
@@ -314,23 +455,27 @@ class SupabaseMegaLeiloes:
 
 if __name__ == "__main__":
     # Teste do cliente
-    print("🧪 Testando SupabaseMegaLeiloes\n")
+    print("🧪 Testando SupabaseMegaLeiloes com Heartbeat\n")
     
-    client = SupabaseMegaLeiloes()
+    client = SupabaseMegaLeiloes(service_name='test_scraper')
     
     if client.test():
+        # Testa heartbeat
+        print("\n💓 Testando Heartbeat:")
+        client.heartbeat_start()
+        time.sleep(2)
+        
+        client.heartbeat_progress(items_processed=100, pages_scraped=1)
+        time.sleep(2)
+        
+        client.heartbeat_success(final_stats={'total': 100})
+        
+        # Estatísticas
         stats = client.get_stats()
         print(f"\n📊 Estatísticas:")
         print(f"  Total de itens: {stats['total']}")
         
-        # Exemplo de busca por categoria
-        imoveis = client.get_by_category('Imóveis', limit=5)
-        print(f"\n🏠 Primeiros imóveis: {len(imoveis)} itens")
-        
-        # Exemplo de busca por praça
-        segunda_praca = client.get_by_round(2, limit=5)
-        print(f"💰 Segunda praça: {len(segunda_praca)} itens")
-        
-        # Exemplo de busca com imagens
-        com_imagem = client.get_with_images(limit=5)
-        print(f"🖼️ Com imagens: {len(com_imagem)} itens")
+        print("\n✅ Teste concluído!")
+        print("\nVerifique as tabelas:")
+        print("  - megaleiloes_items: dados dos leilões")
+        print("  - infra_actions: heartbeat do scraper")

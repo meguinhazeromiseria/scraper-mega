@@ -6,6 +6,7 @@ MEGALEILÕES - SCRAPER COMPLETO E CORRIGIDO
 ✅ Extrai data, lances e imagem corretamente
 ✅ Compatível 100% com tabela megaleiloes_items
 ✅ Usa ?pagina=N (não ?page=N)
+✅ Sistema de heartbeat integrado (infra_actions)
 """
 
 import sys
@@ -112,6 +113,7 @@ class MegaLeiloesScraper:
             print(f"❌ Erro geral: {e}")
             import traceback
             traceback.print_exc()
+            raise  # Re-lança para ser capturado no main
         
         self.stats['total_scraped'] = len(all_items)
         return all_items
@@ -483,7 +485,31 @@ def main():
     
     # Scrape
     scraper = MegaLeiloesScraper()
-    items = scraper.scrape()
+    
+    # Importa cliente Supabase e registra início
+    supabase = None
+    try:
+        if not os.getenv('SUPABASE_URL') or not os.getenv('SUPABASE_SERVICE_ROLE_KEY'):
+            print("\n⚠️ Variáveis SUPABASE não configuradas - heartbeat desabilitado")
+        else:
+            from supabase_client import SupabaseMegaLeiloes
+            supabase = SupabaseMegaLeiloes(service_name='megaleiloes_scraper')
+            
+            # ✅ HEARTBEAT: Registra início
+            supabase.heartbeat_start({'sections': len(scraper.sections)})
+    except ImportError:
+        print("\n⚠️ Módulo supabase_client não encontrado - heartbeat desabilitado")
+    except Exception as e:
+        print(f"\n⚠️ Erro ao inicializar heartbeat: {e}")
+    
+    # Executa scraping
+    try:
+        items = scraper.scrape()
+    except Exception as e:
+        # ✅ HEARTBEAT: Registra erro fatal
+        if supabase:
+            supabase.heartbeat_error(e, context="scrape_main")
+        raise
     
     print(f"\n{'='*70}")
     print(f"📊 RESULTADO FINAL")
@@ -492,7 +518,7 @@ def main():
     print(f"📄 Páginas processadas: {scraper.stats['pages_scraped']}")
     print(f"🖼️ Itens com imagens: {scraper.stats['with_images']}")
     print(f"🔥 Itens com lances: {scraper.stats['with_bids']}")
-    print(f"🔄 Duplicatas filtradas: {scraper.stats['duplicates']}")
+    print(f"📄 Duplicatas filtradas: {scraper.stats['duplicates']}")
     
     if not items:
         print("\n⚠️ Nenhum item coletado - encerrando")
@@ -508,19 +534,18 @@ def main():
         json.dump(items, f, ensure_ascii=False, indent=2)
     print(f"\n💾 JSON salvo: {json_file}")
     
-    # Importa e usa o cliente Supabase
+    # Importa e usa o cliente Supabase para inserção
     try:
-        # Verifica se as variáveis de ambiente estão configuradas
         if not os.getenv('SUPABASE_URL') or not os.getenv('SUPABASE_SERVICE_ROLE_KEY'):
             print("\n⚠️ Variáveis SUPABASE não configuradas - pulando insert")
         else:
-            from supabase_client import SupabaseMegaLeiloes
+            if not supabase:
+                from supabase_client import SupabaseMegaLeiloes
+                supabase = SupabaseMegaLeiloes(service_name='megaleiloes_scraper')
             
             print(f"\n{'='*70}")
             print("📤 INSERINDO NO SUPABASE")
             print(f"{'='*70}")
-            
-            supabase = SupabaseMegaLeiloes()
             
             if not supabase.test():
                 print("⚠️ Erro na conexão com Supabase - pulando insert")
@@ -529,7 +554,7 @@ def main():
                 
                 print(f"\n  📈 RESULTADO:")
                 print(f"    ✅ Inseridos: {stats['inserted']}")
-                print(f"    🔄 Atualizados: {stats['updated']}")
+                print(f"    📄 Atualizados: {stats['updated']}")
                 if stats['errors'] > 0:
                     print(f"    ⚠️ Erros: {stats['errors']}")
     
@@ -538,6 +563,9 @@ def main():
         print("   (JSON salvo, mas não foi possível inserir no banco)")
     except Exception as e:
         print(f"\n⚠️ Erro no Supabase: {e}")
+        # ✅ HEARTBEAT: Registra erro no insert
+        if supabase:
+            supabase.heartbeat_error(e, context="supabase_insert")
         import traceback
         traceback.print_exc()
     
@@ -557,6 +585,18 @@ def main():
     print(f"  • Com lances: {scraper.stats['with_bids']}")
     print(f"  • Duplicatas: {scraper.stats['duplicates']}")
     print(f"\n⏱️ Duração: {minutes}min {seconds}s")
+    
+    # ✅ HEARTBEAT: Registra sucesso com estatísticas finais
+    if supabase:
+        supabase.heartbeat_success(final_stats={
+            'total_items': len(items),
+            'pages_scraped': scraper.stats['pages_scraped'],
+            'with_images': scraper.stats['with_images'],
+            'with_bids': scraper.stats['with_bids'],
+            'by_category': scraper.stats['by_category'],
+            'duration_seconds': round(elapsed, 2)
+        })
+    
     print(f"✅ Concluído: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*70}")
 
