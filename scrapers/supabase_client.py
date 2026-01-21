@@ -6,6 +6,7 @@ SUPABASE CLIENT - MEGALEILOES_ITEMS + HEARTBEAT
 ✅ Sistema de heartbeat integrado (infra_actions)
 ✅ Validação de dados conforme schema
 ✅ UPSERT correto com on_conflict=external_id
+✅ FIX: Headers corretos para schema public no heartbeat
 """
 
 import os
@@ -24,7 +25,7 @@ class SupabaseMegaLeiloes:
         self.key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
         
         if not self.url or not self.key:
-            raise ValueError("❌ Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY")
+            raise ValueError("⚠ Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY")
         
         self.url = self.url.rstrip('/')
         self.table = 'megaleiloes_items'
@@ -85,13 +86,18 @@ class SupabaseMegaLeiloes:
                 'metadata': metadata or {}
             }
             
-            # Remove Content-Profile temporariamente para infra_actions (schema public)
-            temp_headers = self.headers.copy()
-            temp_headers.pop('Content-Profile', None)
-            temp_headers.pop('Accept-Profile', None)
+            # ✅ FIX: Headers EXPLÍCITOS para schema PUBLIC (infra_actions)
+            heartbeat_headers = {
+                'apikey': self.key,
+                'Authorization': f'Bearer {self.key}',
+                'Content-Type': 'application/json',
+                'Content-Profile': 'public',  # ✅ ADICIONADO
+                'Accept-Profile': 'public',    # ✅ ADICIONADO
+                'Prefer': 'resolution=merge-duplicates,return=minimal'
+            }
             
             url = f"{self.url}/rest/v1/infra_actions?on_conflict=service_name"
-            r = self.session.post(url, json=[payload], headers=temp_headers, timeout=30)
+            r = self.session.post(url, json=[payload], headers=heartbeat_headers, timeout=30)
             
             return r.status_code in (200, 201)
                 
